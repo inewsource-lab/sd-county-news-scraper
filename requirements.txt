@@ -1,2 +1,4 @@
-feedparser
-requests
+feedparser>=6.0.10
+requests>=2.31.0
+pyyaml>=6.0.1
+backports.zoneinfo>=0.2.1; python_version < "3.9"
