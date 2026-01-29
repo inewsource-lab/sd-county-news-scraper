@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import feedparser
 import requests
 from datetime import datetime
@@ -103,7 +104,9 @@ def fetch_and_notify():
             pub_date = format_pub_date(entry)
             text_blob = (title + " " + (entry.get('summary','') or '')).lower()
             for community in COMMUNITIES:
-                if community.lower() in text_blob and link not in seen:
+                # Use word boundary matching to ensure "Vista" matches "Vista" but not "Chula Vista"
+                pattern = r'\b' + re.escape(community.lower()) + r'\b'
+                if re.search(pattern, text_blob) and link not in seen:
                     print(f"→ Posting {community}: {title}")
                     requests.post(webhook, json={
                         "text": (

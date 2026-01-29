@@ -2,10 +2,11 @@
 import logging
 import re
 import feedparser
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Set, Optional
+from typing import List, Set, Optional, Tuple, Dict
 from time import sleep
+from urllib.parse import urlparse
 
 from .cache_manager import CacheManager
 from .notifier import send_slack_notification
@@ -18,6 +19,28 @@ FEED_TIMEOUT = 15
 FEED_DELAY = 1
 
 
+def get_pub_datetime(entry) -> Optional[datetime]:
+    """
+    Get publication datetime object from RSS entry.
+    
+    Args:
+        entry: feedparser entry object
+        
+    Returns:
+        datetime object in Pacific Time, or None if unavailable
+    """
+    try:
+        if getattr(entry, 'published_parsed', None):
+            # Build a UTC datetime
+            dt_utc = datetime(*entry.published_parsed[:6], tzinfo=ZoneInfo("UTC"))
+            # Convert to Pacific Time
+            return dt_utc.astimezone(ZoneInfo("America/Los_Angeles"))
+    except Exception as e:
+        logger.debug(f"Error parsing published_parsed: {e}")
+    
+    return None
+
+
 def format_pub_date(entry) -> str:
     """
     Format publication date from RSS entry.
@@ -28,19 +51,107 @@ def format_pub_date(entry) -> str:
     Returns:
         Formatted date string in Pacific Time
     """
-    try:
-        if getattr(entry, 'published_parsed', None):
-            # Build a UTC datetime
-            dt_utc = datetime(*entry.published_parsed[:6], tzinfo=ZoneInfo("UTC"))
-            # Convert to Pacific Time
-            dt_pt = dt_utc.astimezone(ZoneInfo("America/Los_Angeles"))
-            # Format with timezone indicator
-            return dt_pt.strftime('%Y-%m-%d %H:%M PT')
-    except Exception as e:
-        logger.debug(f"Error parsing published_parsed: {e}")
+    dt_pt = get_pub_datetime(entry)
+    if dt_pt:
+        return dt_pt.strftime('%Y-%m-%d %H:%M PT')
     
     # Fall back to raw strings
     return entry.get('published') or entry.get('updated') or 'Unknown date'
+
+
+def extract_source_name(feed_url: str) -> str:
+    """
+    Extract a readable source name from feed URL.
+    
+    Args:
+        feed_url: RSS feed URL
+        
+    Returns:
+        Source name (e.g., "The Coast News", "San Diego Union-Tribune")
+    """
+    try:
+        parsed = urlparse(feed_url)
+        domain = parsed.netloc.lower()
+        
+        # Remove common prefixes
+        domain = domain.replace('www.', '').replace('feeds.', '')
+        
+        # Handle special cases
+        source_map = {
+            'thecoastnews.com': 'The Coast News',
+            'northcoastcurrent.com': 'North Coast Current',
+            'timesofsandiego.com': 'Times of San Diego',
+            'voiceofsandiego.org': 'Voice of San Diego',
+            'sandiegouniontribune.com': 'San Diego Union-Tribune',
+            'nbcsandiego.com': 'NBC San Diego',
+            'cbs8.com': 'CBS 8',
+            'fox5sandiego.com': 'FOX 5 San Diego',
+            'kpbs.org': 'KPBS',
+            'countynewscenter.com': 'County News Center',
+            'sdnews.com': 'SD News',
+            'lgbtqsd.news': 'LGBTQ San Diego',
+            'gay-sd.com': 'Gay San Diego',
+            'delmartimes.net': 'Del Mar Times',
+            'sandiegonewsdesk.com': 'San Diego News Desk',
+            'chulavistatoday.com': 'Chula Vista Today',
+            'triton.news': 'Triton News',
+            'sandiegoreader.com': 'San Diego Reader',
+            'jewishjournal.com': 'Jewish Journal',
+            'ranchosfnews.com': 'Rancho Santa Fe News',
+            'valleycenter.com': 'Valley Center News',
+            'escondidotimes-advocate.com': 'Escondido Times-Advocate',
+            'myvalleynews.com': 'My Valley News',
+            'villagenews.com': 'Village News',
+            'ramonasentinel.com': 'Ramona Sentinel',
+            'powaynewschieftain.com': 'Poway News Chieftain',
+            'sandiegobusiness.com': 'San Diego Business Journal',
+            'patch.com': 'Patch',
+            'coronadotimes.com': 'Coronado Times',
+            'sdcitytimes.com': 'SD City Times',
+            'laprensa.org': 'La Prensa',
+            'clairemonttimes.com': 'Clairemont Times',
+            'thecoronadonews.com': 'The Coronado News',
+            'mesapress.com': 'Mesa Press',
+        }
+        
+        if domain in source_map:
+            return source_map[domain]
+        
+        # For patch.com, try to extract location from path
+        if 'patch.com' in domain:
+            path_parts = parsed.path.split('/')
+            if len(path_parts) > 2:
+                location = path_parts[-2].replace('-', ' ').title()
+                return f'Patch ({location})'
+        
+        # Default: capitalize domain name
+        return domain.split('.')[0].replace('-', ' ').title()
+        
+    except Exception as e:
+        logger.debug(f"Error extracting source name from {feed_url}: {e}")
+        return "Unknown Source"
+
+
+def is_priority_source(feed_url: str, priority_sources: Optional[List[str]] = None) -> bool:
+    """
+    Check if a feed URL is a priority/local source.
+    
+    Args:
+        feed_url: RSS feed URL
+        priority_sources: Optional list of priority source URLs/patterns
+        
+    Returns:
+        True if source is priority/local
+    """
+    if not priority_sources:
+        return False
+    
+    feed_url_lower = feed_url.lower()
+    for priority in priority_sources:
+        if priority.lower() in feed_url_lower:
+            return True
+    
+    return False
 
 
 def fetch_feed(feed_url: str) -> Optional[feedparser.FeedParserDict]:
@@ -70,8 +181,11 @@ def fetch_feed(feed_url: str) -> Optional[feedparser.FeedParserDict]:
 def check_entry_matches(
     entry,
     communities: List[str],
-    cache: CacheManager
-) -> Optional[tuple]:
+    cache: CacheManager,
+    feed_url: str,
+    max_age_hours: Optional[int] = None,
+    priority_sources: Optional[List[str]] = None
+) -> Optional[Dict]:
     """
     Check if an entry matches any community and hasn't been seen.
     
@@ -79,9 +193,23 @@ def check_entry_matches(
         entry: feedparser entry object
         communities: List of community names to match
         cache: CacheManager instance
+        feed_url: URL of the feed this entry came from
+        max_age_hours: Optional maximum age in hours (None = no filtering)
+        priority_sources: Optional list of priority source URLs
         
     Returns:
-        Tuple of (community, title, pub_date, link) if match found, None otherwise
+        Dictionary with match data if found, None otherwise:
+        {
+            'communities': List[str],  # All matching communities
+            'title': str,
+            'pub_date': str,
+            'pub_datetime': datetime,  # For relative time calculation
+            'link': str,
+            'source': str,
+            'excerpt': str,
+            'match_location': str,  # 'title' or 'summary'
+            'is_priority': bool
+        }
     """
     link = entry.get('link')
     if not link:
@@ -91,27 +219,67 @@ def check_entry_matches(
     if cache.has_seen(link):
         return None
     
+    # Check recency filter
+    pub_datetime = get_pub_datetime(entry)
+    if max_age_hours and pub_datetime:
+        age = datetime.now(ZoneInfo("America/Los_Angeles")) - pub_datetime
+        if age > timedelta(hours=max_age_hours):
+            logger.debug(f"Skipping article older than {max_age_hours} hours: {link}")
+            return None
+    
     title = entry.get('title', '').strip()
-    summary_text = (entry.get('summary', '') or '').strip().lower()
+    summary_text = (entry.get('summary', '') or '').strip()
+    title_lower = title.lower()
+    summary_lower = summary_text.lower()
     combined = (title + " " + summary_text).lower()
     
-    # Check against each community using word boundary matching
-    # This ensures "Vista" matches "Vista" but not "Chula Vista"
+    # Find all matching communities
+    matching_communities = []
+    match_location = None
+    
     for community in communities:
         # Escape special regex characters and use word boundaries
         pattern = r'\b' + re.escape(community.lower()) + r'\b'
         if re.search(pattern, combined):
-            pub_date = format_pub_date(entry)
-            return (community, title, pub_date, link)
+            matching_communities.append(community)
+            # Determine if match is in title (more relevant) or summary
+            if not match_location and re.search(pattern, title_lower):
+                match_location = 'title'
+            elif not match_location:
+                match_location = 'summary'
     
-    return None
+    if not matching_communities:
+        return None
+    
+    # Extract excerpt (first N characters of summary, or title if no summary)
+    excerpt = summary_text.strip() if summary_text.strip() else title
+    # Will be truncated in notifier based on config
+    
+    pub_date = format_pub_date(entry)
+    source = extract_source_name(feed_url)
+    is_priority = is_priority_source(feed_url, priority_sources)
+    
+    return {
+        'communities': matching_communities,
+        'title': title,
+        'pub_date': pub_date,
+        'pub_datetime': pub_datetime,
+        'link': link,
+        'source': source,
+        'excerpt': excerpt,
+        'match_location': match_location or 'summary',
+        'is_priority': is_priority
+    }
 
 
 def scrape_and_notify(
     feed_urls: List[str],
     communities: List[str],
     webhook_url: str,
-    cache: CacheManager
+    cache: CacheManager,
+    max_age_hours: Optional[int] = None,
+    priority_sources: Optional[List[str]] = None,
+    excerpt_length: int = 250
 ) -> int:
     """
     Scrape RSS feeds and send notifications for matching articles.
@@ -121,6 +289,9 @@ def scrape_and_notify(
         communities: List of community names to match
         webhook_url: Slack webhook URL
         cache: CacheManager instance
+        max_age_hours: Optional maximum age in hours for articles
+        priority_sources: Optional list of priority source URLs
+        excerpt_length: Maximum length for article excerpts (default: 250)
         
     Returns:
         Number of articles posted
@@ -140,14 +311,33 @@ def scrape_and_notify(
             continue
         
         for entry in feed.entries:
-            match = check_entry_matches(entry, communities, cache)
+            match = check_entry_matches(
+                entry, 
+                communities, 
+                cache, 
+                feed_url,
+                max_age_hours=max_age_hours,
+                priority_sources=priority_sources
+            )
             
             if match:
-                community, title, pub_date, link = match
-                logger.info(f"Match found for {community}: {title}")
+                communities_str = ', '.join(match['communities'])
+                logger.info(f"Match found for {communities_str}: {match['title']}")
                 
-                if send_slack_notification(webhook_url, community, title, pub_date, link):
-                    cache.mark_seen(link)
+                if send_slack_notification(
+                    webhook_url,
+                    match['communities'],
+                    match['title'],
+                    match['pub_date'],
+                    match['pub_datetime'],
+                    match['link'],
+                    match['source'],
+                    match['excerpt'],
+                    match['match_location'],
+                    match['is_priority'],
+                    excerpt_length
+                ):
+                    cache.mark_seen(match['link'])
                     posted_count += 1
         
         # Be respectful - delay between feeds

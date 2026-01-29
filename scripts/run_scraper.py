@@ -88,15 +88,9 @@ def main():
     
     setup_logging(args.debug)
     logger = logging.getLogger(__name__)
-
-    # Map region to config filename
-    config_filenames = {
-        'north': 'north_county.yaml',
-        'south': 'south_bay.yaml'
-    }
     
     # Load configuration
-    config_file = args.config_dir / config_filenames[args.region]
+    config_file = args.config_dir / f"{args.region}_county.yaml"
     try:
         config = load_config(config_file)
         logger.info(f"Loaded configuration for {config['region']} region")
@@ -125,7 +119,16 @@ def main():
         logger.error("No feeds configured")
         sys.exit(1)
     
+    # Get optional configuration settings
+    max_age_hours = config.get('max_age_hours')
+    priority_sources = config.get('priority_sources')
+    excerpt_length = config.get('excerpt_length', 250)
+    
     logger.info(f"Monitoring {len(communities)} communities across {len(feeds)} feeds")
+    if max_age_hours:
+        logger.info(f"Filtering articles to last {max_age_hours} hours")
+    if priority_sources:
+        logger.info(f"Priority sources: {len(priority_sources)} configured")
     
     # Initialize cache manager
     cache = CacheManager(str(args.cache_dir), region=args.region)
@@ -136,7 +139,10 @@ def main():
             feed_urls=feeds,
             communities=communities,
             webhook_url=webhook_url,
-            cache=cache
+            cache=cache,
+            max_age_hours=max_age_hours,
+            priority_sources=priority_sources,
+            excerpt_length=excerpt_length
         )
         
         logger.info(f"Posted {posted_count} new articles")

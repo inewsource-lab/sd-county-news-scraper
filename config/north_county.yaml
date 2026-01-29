@@ -57,3 +57,26 @@ feeds:
   - https://www.ramonasentinel.com/feed/
   - https://www.powaynewschieftain.com/feed/
   - https://www.sandiegobusiness.com/feed/
+
+# Optional settings
+# max_age_hours: Only show articles from the last N hours (useful for hourly runs)
+# Set to null or omit to show all articles regardless of age
+max_age_hours: 24
+
+# priority_sources: List of feed URLs or patterns that are local/community-specific sources
+# These will be highlighted in notifications with "(Local)" badge
+priority_sources:
+  - thecoastnews.com
+  - northcoastcurrent.com
+  - delmartimes.net
+  - ranchosfnews.com
+  - valleycenter.com
+  - escondidotimes-advocate.com
+  - myvalleynews.com
+  - villagenews.com
+  - ramonasentinel.com
+  - powaynewschieftain.com
+  - patch.com/feeds/california
+
+# excerpt_length: Maximum length for article excerpts in characters (default: 250)
+excerpt_length: 250
