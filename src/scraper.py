@@ -1,5 +1,6 @@
 """Core RSS feed scraping logic."""
 import logging
+import re
 import feedparser
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -94,9 +95,12 @@ def check_entry_matches(
     summary_text = (entry.get('summary', '') or '').strip().lower()
     combined = (title + " " + summary_text).lower()
     
-    # Check against each community
+    # Check against each community using word boundary matching
+    # This ensures "Vista" matches "Vista" but not "Chula Vista"
     for community in communities:
-        if community.lower() in combined:
+        # Escape special regex characters and use word boundaries
+        pattern = r'\b' + re.escape(community.lower()) + r'\b'
+        if re.search(pattern, combined):
             pub_date = format_pub_date(entry)
             return (community, title, pub_date, link)
     
