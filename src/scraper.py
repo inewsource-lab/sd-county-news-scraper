@@ -9,7 +9,8 @@ from time import sleep
 from urllib.parse import urlparse
 
 from .cache_manager import CacheManager
-from .notifier import send_slack_notification
+from .notifier import send_slack_notification, send_grouped_notification
+from .story_grouper import StoryGrouper
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +280,9 @@ def scrape_and_notify(
     cache: CacheManager,
     max_age_hours: Optional[int] = None,
     priority_sources: Optional[List[str]] = None,
-    excerpt_length: int = 250
+    excerpt_length: int = 250,
+    group_stories: bool = True,
+    similarity_threshold: float = 0.6
 ) -> int:
     """
     Scrape RSS feeds and send notifications for matching articles.
@@ -292,11 +295,14 @@ def scrape_and_notify(
         max_age_hours: Optional maximum age in hours for articles
         priority_sources: Optional list of priority source URLs
         excerpt_length: Maximum length for article excerpts (default: 250)
+        group_stories: Whether to group similar stories (default: True)
+        similarity_threshold: Minimum similarity to group stories (default: 0.6)
         
     Returns:
         Number of articles posted
     """
-    posted_count = 0
+    # Collect all matches first
+    all_matches: List[Dict] = []
     
     for feed_url in feed_urls:
         feed = fetch_feed(feed_url)
@@ -323,25 +329,71 @@ def scrape_and_notify(
             if match:
                 communities_str = ', '.join(match['communities'])
                 logger.info(f"Match found for {communities_str}: {match['title']}")
-                
-                if send_slack_notification(
-                    webhook_url,
-                    match['communities'],
-                    match['title'],
-                    match['pub_date'],
-                    match['pub_datetime'],
-                    match['link'],
-                    match['source'],
-                    match['excerpt'],
-                    match['match_location'],
-                    match['is_priority'],
-                    excerpt_length
-                ):
-                    cache.mark_seen(match['link'])
-                    posted_count += 1
+                all_matches.append(match)
         
         # Be respectful - delay between feeds
         if feed_url != feed_urls[-1]:  # Don't delay after last feed
             sleep(FEED_DELAY)
+    
+    if not all_matches:
+        logger.info("No matching articles found")
+        return 0
+    
+    posted_count = 0
+    
+    # Group stories if enabled
+    if group_stories and len(all_matches) > 1:
+        grouper = StoryGrouper(similarity_threshold=similarity_threshold)
+        groups = grouper.group_stories(all_matches)
+        
+        for group in groups:
+            if len(group) > 1:
+                # Send grouped notification for multiple articles
+                if send_grouped_notification(
+                    webhook_url,
+                    group,
+                    excerpt_length
+                ):
+                    # Mark all URLs in group as seen
+                    for article in group:
+                        cache.mark_seen(article['link'])
+                    posted_count += len(group)
+                    logger.info(f"Posted grouped notification for {len(group)} articles")
+            else:
+                # Single article - send individual notification
+                article = group[0]
+                if send_slack_notification(
+                    webhook_url,
+                    article['communities'],
+                    article['title'],
+                    article['pub_date'],
+                    article['pub_datetime'],
+                    article['link'],
+                    article['source'],
+                    article['excerpt'],
+                    article['match_location'],
+                    article['is_priority'],
+                    excerpt_length
+                ):
+                    cache.mark_seen(article['link'])
+                    posted_count += 1
+    else:
+        # Grouping disabled or only one match - send individual notifications
+        for match in all_matches:
+            if send_slack_notification(
+                webhook_url,
+                match['communities'],
+                match['title'],
+                match['pub_date'],
+                match['pub_datetime'],
+                match['link'],
+                match['source'],
+                match['excerpt'],
+                match['match_location'],
+                match['is_priority'],
+                excerpt_length
+            ):
+                cache.mark_seen(match['link'])
+                posted_count += 1
     
     return posted_count

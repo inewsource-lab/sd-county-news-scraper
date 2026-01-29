@@ -55,3 +55,12 @@ priority_sources:
 
 # excerpt_length: Maximum length for article excerpts in characters (default: 250)
 excerpt_length: 250
+
+# group_stories: Enable grouping of similar stories from multiple outlets (default: true)
+# When enabled, articles with similar titles will be grouped into a single notification
+group_stories: true
+
+# similarity_threshold: Minimum similarity score (0.0-1.0) to group articles (default: 0.6)
+# Higher values = more strict grouping (only very similar titles)
+# Lower values = more lenient grouping (more articles grouped together)
+similarity_threshold: 0.6

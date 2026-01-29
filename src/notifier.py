@@ -67,6 +67,44 @@ def truncate_excerpt(text: str, max_length: int) -> str:
     return truncated + '...'
 
 
+def select_best_excerpt(articles: List[dict]) -> str:
+    """
+    Select the best excerpt from a group of articles.
+    
+    Priority:
+    1. Excerpts from priority/local sources (longest preferred)
+    2. Longest excerpt from any source
+    3. Title from priority source or first article
+    
+    Args:
+        articles: List of article dictionaries with 'excerpt', 'title', 'is_priority' keys
+        
+    Returns:
+        Best excerpt or title to display
+    """
+    # Priority 1: Excerpts from priority sources
+    priority_excerpts = [a.get('excerpt', '') for a in articles if a.get('is_priority') and a.get('excerpt')]
+    if priority_excerpts:
+        # Return longest priority excerpt
+        best = max(priority_excerpts, key=len)
+        if best and best.strip():
+            return best
+    
+    # Priority 2: Longest excerpt from any source
+    all_excerpts = [a.get('excerpt', '') for a in articles if a.get('excerpt')]
+    if all_excerpts:
+        best = max(all_excerpts, key=len)
+        if best and best.strip():
+            return best
+    
+    # Fallback: Use title from priority source or first article
+    priority_titles = [a.get('title', '') for a in articles if a.get('is_priority') and a.get('title')]
+    if priority_titles:
+        return priority_titles[0]
+    
+    return articles[0].get('title', '') if articles else ''
+
+
 def send_slack_notification(
     webhook_url: str,
     communities: List[str],
@@ -206,6 +244,190 @@ def send_slack_notification(
                 sleep(RETRY_DELAY_BASE ** attempt)
             else:
                 logger.error(f"Failed to post to Slack after {MAX_RETRIES} attempts")
+                return False
+    
+    return False
+
+
+def select_best_excerpt(articles: List[dict]) -> str:
+    """
+    Select the best excerpt from a group of articles.
+    
+    Priority:
+    1. Excerpts from priority/local sources (longest preferred)
+    2. Longest excerpt from any source
+    3. Title from priority source or first article
+    
+    Args:
+        articles: List of article dictionaries with 'excerpt', 'title', 'is_priority' keys
+        
+    Returns:
+        Best excerpt or title to display
+    """
+    # Priority 1: Excerpts from priority sources
+    priority_excerpts = [a.get('excerpt', '') for a in articles if a.get('is_priority') and a.get('excerpt')]
+    if priority_excerpts:
+        # Return longest priority excerpt
+        best = max(priority_excerpts, key=len)
+        if best and best.strip():
+            return best
+    
+    # Priority 2: Longest excerpt from any source
+    all_excerpts = [a.get('excerpt', '') for a in articles if a.get('excerpt')]
+    if all_excerpts:
+        best = max(all_excerpts, key=len)
+        if best and best.strip():
+            return best
+    
+    # Fallback: Use title from priority source or first article
+    priority_titles = [a.get('title', '') for a in articles if a.get('is_priority') and a.get('title')]
+    if priority_titles:
+        return priority_titles[0]
+    
+    return articles[0].get('title', '') if articles else ''
+
+
+def send_grouped_notification(
+    webhook_url: str,
+    articles: List[dict],
+    excerpt_length: int = 250
+) -> bool:
+    """
+    Send grouped notification to Slack for multiple articles about the same story.
+    
+    Args:
+        webhook_url: Slack webhook URL
+        articles: List of article dictionaries (each with same structure as individual notifications)
+        excerpt_length: Maximum excerpt length
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not articles:
+        return False
+    
+    # Get all unique communities from all articles
+    all_communities = set()
+    for article in articles:
+        all_communities.update(article.get('communities', []))
+    communities_list = sorted(list(all_communities))
+    communities_text = ', '.join(communities_list)
+    communities_display = f"🏘️ {communities_text}"
+    
+    # Select best article for main display (priority source first, then most recent)
+    main_article = articles[0]  # Already sorted by priority/time in grouper
+    
+    # Select best excerpt
+    best_excerpt = select_best_excerpt(articles)
+    truncated_excerpt = truncate_excerpt(best_excerpt, excerpt_length) if best_excerpt else None
+    
+    # Format source count
+    source_count = len(articles)
+    sources_display = f"📰 Multiple Sources ({source_count})"
+    
+    # Format relative time for main article
+    relative_time = format_relative_time(main_article.get('pub_datetime'))
+    if relative_time:
+        time_display = f"Published: {relative_time} ({main_article.get('pub_date', 'Unknown date')})"
+    else:
+        time_display = f"Published: {main_article.get('pub_date', 'Unknown date')}"
+    
+    # Build Slack Block Kit payload
+    blocks = []
+    
+    # Header block with communities and source count
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": f"{communities_display} | {sources_display}"
+        }
+    })
+    
+    # Divider
+    blocks.append({"type": "divider"})
+    
+    # Title block
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": f"*{main_article.get('title', 'No title')}*"
+        }
+    })
+    
+    # Best excerpt block (if available and different from title)
+    if truncated_excerpt and truncated_excerpt != main_article.get('title', ''):
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": truncated_excerpt
+            }
+        })
+    
+    # Divider
+    blocks.append({"type": "divider"})
+    
+    # Publication info
+    blocks.append({
+        "type": "context",
+        "elements": [
+            {
+                "type": "mrkdwn",
+                "text": time_display
+            }
+        ]
+    })
+    
+    # Sources section
+    sources_text = "📰 *Sources:*\n"
+    for article in articles:
+        source_name = article.get('source', 'Unknown Source')
+        if article.get('is_priority'):
+            source_name += " (Local)"
+        
+        relative_time_article = format_relative_time(article.get('pub_datetime'))
+        time_str = relative_time_article if relative_time_article else article.get('pub_date', 'Unknown date')
+        
+        link = article.get('link', '#')
+        sources_text += f"• *{source_name}* - {time_str} - <{link}|Read>\n"
+    
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": sources_text.strip()
+        }
+    })
+    
+    payload = {
+        "blocks": blocks,
+        "text": f"{communities_text}: {main_article.get('title', 'No title')} ({source_count} sources)"  # Fallback text
+    }
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.post(
+                webhook_url,
+                json=payload,
+                timeout=REQUEST_TIMEOUT
+            )
+            response.raise_for_status()
+            logger.info(f"Posted grouped notification to Slack: {communities_text} - {source_count} sources")
+            return True
+            
+        except requests.exceptions.Timeout:
+            logger.warning(f"Timeout posting grouped notification to Slack (attempt {attempt + 1}/{MAX_RETRIES})")
+            if attempt < MAX_RETRIES - 1:
+                sleep(RETRY_DELAY_BASE ** attempt)
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error posting grouped notification to Slack (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
+            if attempt < MAX_RETRIES - 1:
+                sleep(RETRY_DELAY_BASE ** attempt)
+            else:
+                logger.error(f"Failed to post grouped notification to Slack after {MAX_RETRIES} attempts")
                 return False
     
     return False

@@ -123,12 +123,18 @@ def main():
     max_age_hours = config.get('max_age_hours')
     priority_sources = config.get('priority_sources')
     excerpt_length = config.get('excerpt_length', 250)
+    group_stories = config.get('group_stories', True)
+    similarity_threshold = config.get('similarity_threshold', 0.6)
     
     logger.info(f"Monitoring {len(communities)} communities across {len(feeds)} feeds")
     if max_age_hours:
         logger.info(f"Filtering articles to last {max_age_hours} hours")
     if priority_sources:
         logger.info(f"Priority sources: {len(priority_sources)} configured")
+    if group_stories:
+        logger.info(f"Story grouping enabled (similarity threshold: {similarity_threshold})")
+    else:
+        logger.info("Story grouping disabled")
     
     # Initialize cache manager
     cache = CacheManager(str(args.cache_dir), region=args.region)
@@ -142,7 +148,9 @@ def main():
             cache=cache,
             max_age_hours=max_age_hours,
             priority_sources=priority_sources,
-            excerpt_length=excerpt_length
+            excerpt_length=excerpt_length,
+            group_stories=group_stories,
+            similarity_threshold=similarity_threshold
         )
         
         logger.info(f"Posted {posted_count} new articles")
