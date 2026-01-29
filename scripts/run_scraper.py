@@ -88,9 +88,15 @@ def main():
     
     setup_logging(args.debug)
     logger = logging.getLogger(__name__)
+
+    # Map region to config filename
+    config_filenames = {
+        'north': 'north_county.yaml',
+        'south': 'south_bay.yaml'
+    }
     
     # Load configuration
-    config_file = args.config_dir / f"{args.region}_county.yaml"
+    config_file = args.config_dir / config_filenames[args.region]
     try:
         config = load_config(config_file)
         logger.info(f"Loaded configuration for {config['region']} region")
