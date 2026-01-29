@@ -52,7 +52,7 @@ Edit the YAML files in the `config/` directory to customize:
 - **Feeds**: RSS feed URLs to scrape
 
 - `config/north_county.yaml` - North County configuration
-- `config/south_bay.yaml` - South Bay configuration
+- `config/south_county.yaml` - South Bay configuration
 
 ## Usage
 
@@ -104,7 +104,7 @@ SD County news scrapers/
 ├── .gitignore
 ├── config/
 │   ├── north_county.yaml
-│   └── south_bay.yaml
+│   └── south_county.yaml
 ├── src/
 │   ├── __init__.py
 │   ├── scraper.py          # Core scraping logic
@@ -146,7 +146,7 @@ The scraper maintains a cache of seen article URLs to prevent duplicate posts. T
 
 ### "Config file not found"
 - Verify config files exist in `config/` directory
-- Check file names: `north_county.yaml` and `south_bay.yaml`
+- Check file names: `north_county.yaml` and `south_county.yaml`
 
 ### "No articles posted"
 - Check logs for feed fetching errors
