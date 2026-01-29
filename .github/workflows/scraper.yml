@@ -1,0 +1,52 @@
+name: San Diego County News Scraper
+
+on:
+  schedule:
+    # Run every hour at minute 0
+    - cron: '0 * * * *'
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  scrape-north:
+    runs-on: ubuntu-latest
+    name: Scrape North County
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run North County scraper
+        env:
+          SLACK_WEBHOOK_NORTH: ${{ secrets.SLACK_WEBHOOK_NORTH }}
+        run: |
+          python scripts/run_scraper.py --region north
+
+  scrape-south:
+    runs-on: ubuntu-latest
+    name: Scrape South Bay
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run South Bay scraper
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python scripts/run_scraper.py --region south
