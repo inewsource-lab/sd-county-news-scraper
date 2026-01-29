@@ -23,11 +23,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/seen_north.txt
+          key: cache-north-${{ runner.os }}
+          restore-keys: |
+            cache-north-${{ runner.os }}
+      
       - name: Run North County scraper
         env:
           SLACK_WEBHOOK_NORTH: ${{ secrets.SLACK_WEBHOOK_NORTH }}
         run: |
           python scripts/run_scraper.py --region north
+      
+      - name: Save cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/seen_north.txt
+          key: cache-north-${{ runner.os }}-${{ github.run_id }}
+        if: always()
 
   scrape-south:
     runs-on: ubuntu-latest
@@ -45,8 +60,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/seen_south.txt
+          key: cache-south-${{ runner.os }}
+          restore-keys: |
+            cache-south-${{ runner.os }}
+      
       - name: Run South Bay scraper
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           python scripts/run_scraper.py --region south
+      
+      - name: Save cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/seen_south.txt
+          key: cache-south-${{ runner.os }}-${{ github.run_id }}
+        if: always()
