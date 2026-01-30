@@ -28,7 +28,8 @@ jobs:
         id: cache-north
         with:
           path: .cache
-          key: cache-north-${{ runner.os }}
+          # Dynamic key so we never exact-match; fall back to latest prefix match
+          key: cache-north-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             cache-north-${{ runner.os }}
       
@@ -76,7 +77,8 @@ jobs:
         id: cache-south
         with:
           path: .cache
-          key: cache-south-${{ runner.os }}
+          # Dynamic key so we never exact-match; fall back to latest prefix match
+          key: cache-south-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             cache-south-${{ runner.os }}
       
