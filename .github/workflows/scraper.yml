@@ -23,15 +23,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Restore and save cache
-        uses: actions/cache@v4
+      - name: Restore cache
+        uses: actions/cache/restore@v4
         id: cache-north
         with:
           path: .cache
           key: cache-north-${{ runner.os }}
           restore-keys: |
             cache-north-${{ runner.os }}
-          save-always: true
       
       - name: Verify cache (North)
         run: |
@@ -43,6 +42,13 @@ jobs:
           SLACK_WEBHOOK_NORTH: ${{ secrets.SLACK_WEBHOOK_NORTH }}
         run: |
           python scripts/run_scraper.py --region north
+      
+      - name: Save cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .cache
+          key: cache-north-${{ runner.os }}
       
       - name: Print debug log (North)
         if: always()
@@ -65,15 +71,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Restore and save cache
-        uses: actions/cache@v4
+      - name: Restore cache
+        uses: actions/cache/restore@v4
         id: cache-south
         with:
           path: .cache
           key: cache-south-${{ runner.os }}
           restore-keys: |
             cache-south-${{ runner.os }}
-          save-always: true
       
       - name: Verify cache (South)
         run: |
@@ -85,6 +90,13 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           python scripts/run_scraper.py --region south
+      
+      - name: Save cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .cache
+          key: cache-south-${{ runner.os }}
       
       - name: Print debug log (South)
         if: always()
