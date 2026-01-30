@@ -31,6 +31,7 @@ jobs:
           key: cache-north-${{ runner.os }}
           restore-keys: |
             cache-north-${{ runner.os }}
+          save-always: true
       
       - name: Verify cache (North)
         run: |
@@ -42,6 +43,11 @@ jobs:
           SLACK_WEBHOOK_NORTH: ${{ secrets.SLACK_WEBHOOK_NORTH }}
         run: |
           python scripts/run_scraper.py --region north
+      
+      - name: Print debug log (North)
+        if: always()
+        run: |
+          if [ -f .cursor/debug.log ]; then echo "--- DEBUG LOG (North) ---"; cat .cursor/debug.log; else echo "No debug log"; fi
 
   scrape-south:
     runs-on: ubuntu-latest
@@ -67,6 +73,7 @@ jobs:
           key: cache-south-${{ runner.os }}
           restore-keys: |
             cache-south-${{ runner.os }}
+          save-always: true
       
       - name: Verify cache (South)
         run: |
@@ -78,3 +85,8 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           python scripts/run_scraper.py --region south
+      
+      - name: Print debug log (South)
+        if: always()
+        run: |
+          if [ -f .cursor/debug.log ]; then echo "--- DEBUG LOG (South) ---"; cat .cursor/debug.log; else echo "No debug log"; fi
