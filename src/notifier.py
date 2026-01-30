@@ -116,11 +116,12 @@ def send_slack_notification(
     excerpt: str,
     match_location: str,
     is_priority: bool,
-    excerpt_length: int = 250
+    excerpt_length: int = 250,
+    unfurl_links: bool = True
 ) -> bool:
     """
     Send notification to Slack webhook using Block Kit format.
-    
+
     Args:
         webhook_url: Slack webhook URL
         communities: List of matching community names
@@ -133,7 +134,8 @@ def send_slack_notification(
         match_location: Where match was found ('title' or 'summary')
         is_priority: Whether source is a priority/local source
         excerpt_length: Maximum excerpt length
-        
+        unfurl_links: If False, disable Slack link/media unfurling (default: True)
+
     Returns:
         True if successful, False otherwise
     """
@@ -159,13 +161,10 @@ def send_slack_notification(
     # Truncate excerpt
     truncated_excerpt = truncate_excerpt(excerpt, excerpt_length) if excerpt else None
     
-    # Build Slack Block Kit payload
+    # Build Slack Block Kit payload (dividers only at message boundaries to reduce clutter)
     blocks = []
-    
-    # Leading divider for clear break from previous message
+
     blocks.append({"type": "divider"})
-    
-    # Header block with communities and source
     blocks.append({
         "type": "section",
         "text": {
@@ -173,11 +172,6 @@ def send_slack_notification(
             "text": f"{communities_display} | {source_display}"
         }
     })
-    
-    # Divider
-    blocks.append({"type": "divider"})
-    
-    # Title block
     blocks.append({
         "type": "section",
         "text": {
@@ -185,33 +179,18 @@ def send_slack_notification(
             "text": f"*{title}*"
         }
     })
-    
-    # Divider
-    blocks.append({"type": "divider"})
-    
-    # Publication info
     match_indicator = "📍 In title" if match_location == 'title' else "📄 In summary"
     blocks.append({
         "type": "context",
         "elements": [
-            {
-                "type": "mrkdwn",
-                "text": f"{time_display} • {match_indicator}"
-            }
+            {"type": "mrkdwn", "text": f"{time_display} • {match_indicator}"}
         ]
     })
-    
-    # Excerpt block (if available)
     if truncated_excerpt and truncated_excerpt != title:
         blocks.append({
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": truncated_excerpt
-            }
+            "text": {"type": "mrkdwn", "text": truncated_excerpt}
         })
-    
-    # Link block
     blocks.append({
         "type": "section",
         "text": {
@@ -219,14 +198,15 @@ def send_slack_notification(
             "text": f"🔗 <{link}|Read more>"
         }
     })
-    
-    # Trailing divider for clear break to next message
     blocks.append({"type": "divider"})
-    
+
     payload = {
         "blocks": blocks,
-        "text": f"{communities_text}: {title}"  # Fallback text for notifications
+        "text": f"{communities_text}: {title}"
     }
+    if not unfurl_links:
+        payload["unfurl_links"] = False
+        payload["unfurl_media"] = False
     
     for attempt in range(MAX_RETRIES):
         try:
@@ -255,57 +235,21 @@ def send_slack_notification(
     return False
 
 
-def select_best_excerpt(articles: List[dict]) -> str:
-    """
-    Select the best excerpt from a group of articles.
-    
-    Priority:
-    1. Excerpts from priority/local sources (longest preferred)
-    2. Longest excerpt from any source
-    3. Title from priority source or first article
-    
-    Args:
-        articles: List of article dictionaries with 'excerpt', 'title', 'is_priority' keys
-        
-    Returns:
-        Best excerpt or title to display
-    """
-    # Priority 1: Excerpts from priority sources
-    priority_excerpts = [a.get('excerpt', '') for a in articles if a.get('is_priority') and a.get('excerpt')]
-    if priority_excerpts:
-        # Return longest priority excerpt
-        best = max(priority_excerpts, key=len)
-        if best and best.strip():
-            return best
-    
-    # Priority 2: Longest excerpt from any source
-    all_excerpts = [a.get('excerpt', '') for a in articles if a.get('excerpt')]
-    if all_excerpts:
-        best = max(all_excerpts, key=len)
-        if best and best.strip():
-            return best
-    
-    # Fallback: Use title from priority source or first article
-    priority_titles = [a.get('title', '') for a in articles if a.get('is_priority') and a.get('title')]
-    if priority_titles:
-        return priority_titles[0]
-    
-    return articles[0].get('title', '') if articles else ''
-
-
 def send_grouped_notification(
     webhook_url: str,
     articles: List[dict],
-    excerpt_length: int = 250
+    excerpt_length: int = 250,
+    unfurl_links: bool = True
 ) -> bool:
     """
     Send grouped notification to Slack for multiple articles about the same story.
-    
+
     Args:
         webhook_url: Slack webhook URL
         articles: List of article dictionaries (each with same structure as individual notifications)
         excerpt_length: Maximum excerpt length
-        
+        unfurl_links: If False, disable Slack link/media unfurling (default: True)
+
     Returns:
         True if successful, False otherwise
     """
@@ -352,11 +296,6 @@ def send_grouped_notification(
             "text": f"{communities_display} | {sources_display}"
         }
     })
-    
-    # Divider
-    blocks.append({"type": "divider"})
-    
-    # Title block
     blocks.append({
         "type": "section",
         "text": {
@@ -364,32 +303,15 @@ def send_grouped_notification(
             "text": f"*{main_article.get('title', 'No title')}*"
         }
     })
-    
-    # Best excerpt block (if available and different from title)
     if truncated_excerpt and truncated_excerpt != main_article.get('title', ''):
         blocks.append({
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": truncated_excerpt
-            }
+            "text": {"type": "mrkdwn", "text": truncated_excerpt}
         })
-    
-    # Divider
-    blocks.append({"type": "divider"})
-    
-    # Publication info
     blocks.append({
         "type": "context",
-        "elements": [
-            {
-                "type": "mrkdwn",
-                "text": time_display
-            }
-        ]
+        "elements": [{"type": "mrkdwn", "text": time_display}]
     })
-    
-    # Sources section
     sources_text = "📰 *Sources:*\n"
     for article in articles:
         source_name = article.get('source', 'Unknown Source')
@@ -409,15 +331,16 @@ def send_grouped_notification(
             "text": sources_text.strip()
         }
     })
-    
-    # Trailing divider for clear break to next message
     blocks.append({"type": "divider"})
-    
+
     payload = {
         "blocks": blocks,
-        "text": f"{communities_text}: {main_article.get('title', 'No title')} ({source_count} sources)"  # Fallback text
+        "text": f"{communities_text}: {main_article.get('title', 'No title')} ({source_count} sources)"
     }
-    
+    if not unfurl_links:
+        payload["unfurl_links"] = False
+        payload["unfurl_media"] = False
+
     for attempt in range(MAX_RETRIES):
         try:
             response = requests.post(
