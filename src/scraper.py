@@ -300,7 +300,8 @@ def scrape_and_notify(
     priority_sources: Optional[List[str]] = None,
     excerpt_length: int = 250,
     group_stories: bool = True,
-    similarity_threshold: float = 0.6
+    similarity_threshold: float = 0.6,
+    unfurl_links: bool = False
 ) -> int:
     """
     Scrape RSS feeds and send notifications for matching articles.
@@ -315,6 +316,7 @@ def scrape_and_notify(
         excerpt_length: Maximum length for article excerpts (default: 250)
         group_stories: Whether to group similar stories (default: True)
         similarity_threshold: Minimum similarity to group stories (default: 0.6)
+        unfurl_links: If False, disable Slack link/media unfurling (default: True)
         
     Returns:
         Number of articles posted
@@ -370,7 +372,8 @@ def scrape_and_notify(
                 if send_grouped_notification(
                     webhook_url,
                     group,
-                    excerpt_length
+                    excerpt_length,
+                    unfurl_links
                 ):
                     # Mark all URLs in group as seen
                     for article in group:
@@ -391,7 +394,8 @@ def scrape_and_notify(
                     article['excerpt'],
                     article['match_location'],
                     article['is_priority'],
-                    excerpt_length
+                    excerpt_length,
+                    unfurl_links
                 ):
                     cache.mark_seen(article['link'])
                     posted_count += 1
@@ -409,7 +413,8 @@ def scrape_and_notify(
                 match['excerpt'],
                 match['match_location'],
                 match['is_priority'],
-                excerpt_length
+                excerpt_length,
+                unfurl_links
             ):
                 cache.mark_seen(match['link'])
                 posted_count += 1
