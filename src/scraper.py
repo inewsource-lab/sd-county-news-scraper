@@ -1,6 +1,9 @@
 """Core RSS feed scraping logic."""
+import json
 import logging
 import re
+import time
+from pathlib import Path
 import feedparser
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
@@ -14,6 +17,17 @@ from .notifier import send_slack_notification, send_grouped_notification
 from .story_grouper import StoryGrouper
 
 logger = logging.getLogger(__name__)
+
+# #region agent log
+_DEBUG_LOG_PATH = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
+def _debug_log(location: str, message: str, data: dict, hypothesis_id: str, run_id: str = "run1"):
+    try:
+        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"location": location, "message": message, "data": data, "hypothesisId": hypothesis_id, "runId": run_id, "timestamp": time.time()}) + "\n")
+    except Exception:
+        pass
+# #endregion
 
 # Request timeout for feed fetching
 FEED_TIMEOUT = 15
@@ -235,6 +249,9 @@ def check_entry_matches(
     
     # Skip if already seen
     if cache.has_seen(link):
+        # #region agent log
+        _debug_log("scraper.check_entry_matches", "skip_already_seen", {"link": link[:80] + "..." if len(link) > 80 else link}, "H3")
+        # #endregion
         return None
     
     # Check recency filter
@@ -349,6 +366,9 @@ def scrape_and_notify(
             if match:
                 communities_str = ', '.join(match['communities'])
                 logger.info(f"Match found for {communities_str}: {match['title']}")
+                # #region agent log
+                _debug_log("scraper.scrape_and_notify", "match_added", {"link": match["link"][:80] + "..." if len(match["link"]) > 80 else match["link"], "title": match["title"][:50] + "..." if len(match["title"]) > 50 else match["title"], "feed_url": feed_url[:60] + "..." if len(feed_url) > 60 else feed_url}, "H5")
+                # #endregion
                 all_matches.append(match)
         
         # Be respectful - delay between feeds
@@ -376,6 +396,9 @@ def scrape_and_notify(
                     unfurl_links
                 ):
                     # Mark all URLs in group as seen
+                    # #region agent log
+                    _debug_log("scraper.scrape_and_notify", "group_posted_marking", {"urls": [a["link"][:60] + "..." for a in group], "group_size": len(group)}, "H3")
+                    # #endregion
                     for article in group:
                         cache.mark_seen(article['link'])
                     posted_count += len(group)
@@ -397,6 +420,9 @@ def scrape_and_notify(
                     excerpt_length,
                     unfurl_links
                 ):
+                    # #region agent log
+                    _debug_log("scraper.scrape_and_notify", "single_posted_marking", {"link": article["link"][:80] + "..." if len(article["link"]) > 80 else article["link"]}, "H3")
+                    # #endregion
                     cache.mark_seen(article['link'])
                     posted_count += 1
     else:
@@ -416,6 +442,9 @@ def scrape_and_notify(
                 excerpt_length,
                 unfurl_links
             ):
+                # #region agent log
+                _debug_log("scraper.scrape_and_notify", "single_posted_marking_no_group", {"link": match["link"][:80] + "..." if len(match["link"]) > 80 else match["link"]}, "H3")
+                # #endregion
                 cache.mark_seen(match['link'])
                 posted_count += 1
     
