@@ -2,6 +2,7 @@
 import logging
 import re
 import feedparser
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Set, Optional, Tuple, Dict
@@ -155,6 +156,22 @@ def is_priority_source(feed_url: str, priority_sources: Optional[List[str]] = No
     return False
 
 
+def strip_html(html_str: str) -> str:
+    """
+    Remove HTML tags and return plain text.
+    
+    Args:
+        html_str: Raw HTML string (e.g. RSS summary)
+        
+    Returns:
+        Plain text with tags removed, whitespace collapsed
+    """
+    if not html_str or not html_str.strip():
+        return ''
+    soup = BeautifulSoup(html_str, 'html.parser')
+    return soup.get_text(separator=' ', strip=True)
+
+
 def fetch_feed(feed_url: str) -> Optional[feedparser.FeedParserDict]:
     """
     Fetch and parse an RSS feed with error handling.
@@ -229,10 +246,11 @@ def check_entry_matches(
             return None
     
     title = entry.get('title', '').strip()
-    summary_text = (entry.get('summary', '') or '').strip()
+    summary_raw = (entry.get('summary', '') or '').strip()
+    summary_plain = strip_html(summary_raw).strip()
     title_lower = title.lower()
-    summary_lower = summary_text.lower()
-    combined = (title + " " + summary_text).lower()
+    summary_lower = summary_plain.lower()
+    combined = (title + " " + summary_plain).lower()
     
     # Find all matching communities
     matching_communities = []
@@ -252,8 +270,8 @@ def check_entry_matches(
     if not matching_communities:
         return None
     
-    # Extract excerpt (first N characters of summary, or title if no summary)
-    excerpt = summary_text.strip() if summary_text.strip() else title
+    # Extract excerpt (plain-text summary, or title if no summary)
+    excerpt = summary_plain if summary_plain else title
     # Will be truncated in notifier based on config
     
     pub_date = format_pub_date(entry)
