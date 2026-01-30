@@ -48,7 +48,7 @@ jobs:
         if: always()
         with:
           path: .cache
-          key: cache-north-${{ runner.os }}
+          key: cache-north-${{ runner.os }}-${{ github.run_id }}
       
       - name: Print debug log (North)
         if: always()
@@ -96,7 +96,7 @@ jobs:
         if: always()
         with:
           path: .cache
-          key: cache-south-${{ runner.os }}
+          key: cache-south-${{ runner.os }}-${{ github.run_id }}
       
       - name: Print debug log (South)
         if: always()
