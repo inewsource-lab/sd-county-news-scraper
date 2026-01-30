@@ -28,10 +28,7 @@ jobs:
         id: cache-north
         with:
           path: .cache
-          # Dynamic key so we never exact-match; fall back to latest prefix match
-          key: cache-north-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            cache-north-${{ runner.os }}
+          key: cache-north-${{ runner.os }}
       
       - name: Verify cache (North)
         run: |
@@ -49,7 +46,7 @@ jobs:
         if: always()
         with:
           path: .cache
-          key: cache-north-${{ runner.os }}-${{ github.run_id }}
+          key: cache-north-${{ runner.os }}
       
       - name: Print debug log (North)
         if: always()
@@ -77,10 +74,7 @@ jobs:
         id: cache-south
         with:
           path: .cache
-          # Dynamic key so we never exact-match; fall back to latest prefix match
-          key: cache-south-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            cache-south-${{ runner.os }}
+          key: cache-south-${{ runner.os }}
       
       - name: Verify cache (South)
         run: |
@@ -98,7 +92,7 @@ jobs:
         if: always()
         with:
           path: .cache
-          key: cache-south-${{ runner.os }}-${{ github.run_id }}
+          key: cache-south-${{ runner.os }}
       
       - name: Print debug log (South)
         if: always()
