@@ -162,6 +162,9 @@ def send_slack_notification(
     # Build Slack Block Kit payload
     blocks = []
     
+    # Leading divider for clear break from previous message
+    blocks.append({"type": "divider"})
+    
     # Header block with communities and source
     blocks.append({
         "type": "section",
@@ -216,6 +219,9 @@ def send_slack_notification(
             "text": f"🔗 <{link}|Read more>"
         }
     })
+    
+    # Trailing divider for clear break to next message
+    blocks.append({"type": "divider"})
     
     payload = {
         "blocks": blocks,
@@ -335,6 +341,9 @@ def send_grouped_notification(
     # Build Slack Block Kit payload
     blocks = []
     
+    # Leading divider for clear break from previous message
+    blocks.append({"type": "divider"})
+    
     # Header block with communities and source count
     blocks.append({
         "type": "section",
@@ -400,6 +409,9 @@ def send_grouped_notification(
             "text": sources_text.strip()
         }
     })
+    
+    # Trailing divider for clear break to next message
+    blocks.append({"type": "divider"})
     
     payload = {
         "blocks": blocks,
