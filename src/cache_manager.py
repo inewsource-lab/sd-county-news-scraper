@@ -2,13 +2,27 @@
 import os
 from pathlib import Path
 from typing import Set
-from collections import deque
+from urllib.parse import urlparse, urlunparse
 import logging
 
 logger = logging.getLogger(__name__)
 
 # Maximum number of entries to keep in cache (prevents unbounded growth)
 MAX_CACHE_SIZE = 10000
+
+
+def _normalize_url(url: str) -> str:
+    """
+    Normalize URL for cache key: scheme + netloc + path only (no query or fragment).
+    Same article with different ?utm_source= or other params maps to the same key.
+    """
+    if not url or not url.strip():
+        return ""
+    try:
+        parsed = urlparse(url.strip())
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+    except Exception:
+        return url.strip()
 
 
 class CacheManager:
@@ -31,26 +45,30 @@ class CacheManager:
         logger.info(f"Loaded {len(self.seen)} entries from cache")
     
     def _load_cache(self) -> Set[str]:
-        """Load seen URLs from cache file."""
+        """Load seen URLs from cache file (all lines; normalized for consistent dedup)."""
         if not self.seen_file.exists():
             return set()
         
         try:
             with open(self.seen_file, 'r', encoding='utf-8') as f:
-                # Use deque to limit memory usage for very large files
-                lines = deque(f, maxlen=MAX_CACHE_SIZE)
-                return set(line.strip() for line in lines if line.strip())
+                return set(
+                    _normalize_url(line.strip())
+                    for line in f
+                    if line.strip()
+                )
         except Exception as e:
             logger.error(f"Error loading cache file {self.seen_file}: {e}")
             return set()
     
     def has_seen(self, url: str) -> bool:
-        """Check if URL has been seen before."""
-        return url in self.seen
+        """Check if URL has been seen before (uses normalized URL for comparison)."""
+        return _normalize_url(url) in self.seen
     
     def mark_seen(self, url: str) -> None:
-        """Mark URL as seen."""
-        self.seen.add(url)
+        """Mark URL as seen (stores normalized URL)."""
+        key = _normalize_url(url)
+        if key:
+            self.seen.add(key)
     
     def save(self) -> None:
         """Save cache to disk."""
