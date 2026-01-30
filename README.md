@@ -50,6 +50,9 @@ Edit the YAML files in the `config/` directory to customize:
 
 - **Communities**: List of community names to monitor
 - **Feeds**: RSS feed URLs to scrape
+- **Optional** (see comments in YAML): `max_age_hours`, `priority_sources`, `excerpt_length`, `group_stories`, `similarity_threshold`, `slack_unfurl_links`
+
+Set `slack_unfurl_links: false` to disable Slack link/media previews (default: `true`).
 
 - `config/north_county.yaml` - North County configuration
 - `config/south_county.yaml` - South Bay configuration

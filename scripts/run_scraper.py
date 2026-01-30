@@ -125,6 +125,7 @@ def main():
     excerpt_length = config.get('excerpt_length', 250)
     group_stories = config.get('group_stories', True)
     similarity_threshold = config.get('similarity_threshold', 0.6)
+    unfurl_links = config.get('slack_unfurl_links', True)
     
     logger.info(f"Monitoring {len(communities)} communities across {len(feeds)} feeds")
     if max_age_hours:
@@ -150,7 +151,8 @@ def main():
             priority_sources=priority_sources,
             excerpt_length=excerpt_length,
             group_stories=group_stories,
-            similarity_threshold=similarity_threshold
+            similarity_threshold=similarity_threshold,
+            unfurl_links=unfurl_links
         )
         
         logger.info(f"Posted {posted_count} new articles")

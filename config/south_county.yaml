@@ -64,3 +64,6 @@ group_stories: true
 # Higher values = more strict grouping (only very similar titles)
 # Lower values = more lenient grouping (more articles grouped together)
 similarity_threshold: 0.6
+
+# slack_unfurl_links: Set to false to disable Slack link/media previews (default: true)
+# slack_unfurl_links: false
