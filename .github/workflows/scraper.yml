@@ -28,7 +28,10 @@ jobs:
         id: cache-north
         with:
           path: .cache
-          key: cache-north-${{ runner.os }}
+          # Unique key per run so we never exact-match; restore-keys gets latest
+          key: cache-north-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            cache-north-${{ runner.os }}
       
       - name: Verify cache (North)
         run: |
@@ -46,7 +49,8 @@ jobs:
         if: always()
         with:
           path: .cache
-          key: cache-north-${{ runner.os }}
+          # Unique key per run to avoid "Unable to reserve cache" when runs overlap
+          key: cache-north-${{ runner.os }}-${{ github.run_id }}
       
       - name: Print debug log (North)
         if: always()
@@ -74,7 +78,9 @@ jobs:
         id: cache-south
         with:
           path: .cache
-          key: cache-south-${{ runner.os }}
+          key: cache-south-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            cache-south-${{ runner.os }}
       
       - name: Verify cache (South)
         run: |
@@ -92,7 +98,7 @@ jobs:
         if: always()
         with:
           path: .cache
-          key: cache-south-${{ runner.os }}
+          key: cache-south-${{ runner.os }}-${{ github.run_id }}
       
       - name: Print debug log (South)
         if: always()
