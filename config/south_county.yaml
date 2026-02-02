@@ -15,7 +15,6 @@ communities:
 
 feeds:
   - https://www.sandiegouniontribune.com/rss/feed
-  - https://www.sandiegoreader.com/feeds/print/
   - https://www.nbcsandiego.com/?rss=y
   - https://feeds.feedblitz.com/cbs8/news
   - https://timesofsandiego.com/feed
@@ -24,18 +23,17 @@ feeds:
   - https://coronadotimes.com/feed
   - https://sdcitytimes.com/feed
   - https://laprensa.org/feed
-  - https://clairemonttimes.com/feed
   - https://thecoronadonews.com/feed
   - https://mesapress.com/feed
   - https://sdnews.com/feed
   - https://lgbtqsd.news/feed
   - https://gay-sd.com/feed
-  - https://delmartimes.net/feed
   - https://sandiegonewsdesk.com/feed
   - https://chulavistatoday.com/feed
   - https://triton.news/feed
   - https://www.kpbs.org/index.rss
   - https://fox5sandiego.com/feed
+  - https://thedailyaztec.com/feed/
 
 # Optional settings
 # max_age_hours: Only show articles from the last N hours (useful for hourly runs)
@@ -49,7 +47,6 @@ priority_sources:
   - coronadotimes.com
   - sdcitytimes.com
   - laprensa.org
-  - clairemonttimes.com
   - thecoronadonews.com
   - mesapress.com
 

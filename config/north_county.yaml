@@ -35,28 +35,22 @@ feeds:
   - https://fox5sandiego.com/feed
   - https://www.kpbs.org/index.rss
   - https://www.countynewscenter.com/news/rss
-  - https://sdnews.com/feed
   - https://lgbtqsd.news/feed
   - https://gay-sd.com/feed
-  - https://delmartimes.net/feed
   - https://sandiegonewsdesk.com/feed
   - https://chulavistatoday.com/feed
   - https://triton.news/feed
-  - https://www.sandiegoreader.com/feeds/print/
   - https://jewishjournal.com/feed/
-  - https://www.ranchosfnews.com/feed/
   - https://www.valleycenter.com/feed/
-  - https://escondidotimes-advocate.com/feed/
+  - https://www.times-advocate.com/feed/
   - https://myvalleynews.com/feed/
-  - https://www.villagenews.com/feed/
+  - https://www.villagenews.com/rss
   - https://patch.com/feeds/california/encinitas
   - https://patch.com/feeds/california/carlsbad
   - https://patch.com/feeds/california/oceanside-camp-pendleton
   - https://patch.com/feeds/california/san-marcos-vista
   - https://patch.com/feeds/california/poway
-  - https://www.ramonasentinel.com/feed/
-  - https://www.powaynewschieftain.com/feed/
-  - https://www.sandiegobusiness.com/feed/
+  - https://thedailyaztec.com/feed/
 
 # Optional settings
 # max_age_hours: Only show articles from the last N hours (useful for hourly runs)
@@ -68,14 +62,10 @@ max_age_hours: 24
 priority_sources:
   - thecoastnews.com
   - northcoastcurrent.com
-  - delmartimes.net
-  - ranchosfnews.com
   - valleycenter.com
-  - escondidotimes-advocate.com
+  - times-advocate.com
   - myvalleynews.com
   - villagenews.com
-  - ramonasentinel.com
-  - powaynewschieftain.com
   - patch.com/feeds/california
 
 # excerpt_length: Maximum length for article excerpts in characters (default: 250)
