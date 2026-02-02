@@ -41,6 +41,7 @@ jobs:
       - name: Run North County scraper
         env:
           SLACK_WEBHOOK_NORTH: ${{ secrets.SLACK_WEBHOOK_NORTH }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python scripts/run_scraper.py --region north
       
@@ -50,11 +51,6 @@ jobs:
         with:
           path: .cache
           key: seen-v2-north-${{ runner.os }}-${{ github.run_id }}
-      
-      - name: Print debug log (North)
-        if: always()
-        run: |
-          if [ -f .cursor/debug.log ]; then echo "--- DEBUG LOG (North) ---"; cat .cursor/debug.log; else echo "No debug log"; fi
 
   scrape-south:
     runs-on: ubuntu-latest
@@ -89,6 +85,7 @@ jobs:
       - name: Run South Bay scraper
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python scripts/run_scraper.py --region south
       
@@ -98,8 +95,3 @@ jobs:
         with:
           path: .cache
           key: seen-v2-south-${{ runner.os }}-${{ github.run_id }}
-      
-      - name: Print debug log (South)
-        if: always()
-        run: |
-          if [ -f .cursor/debug.log ]; then echo "--- DEBUG LOG (South) ---"; cat .cursor/debug.log; else echo "No debug log"; fi
