@@ -438,6 +438,12 @@ def scrape_and_notify(
                 logger.info(f"Match found for {communities_str}: {match['title']}")
                 all_matches.append(match)
             elif use_ai_relevance and llm.is_available() and not (exclude_syndicated_from and is_syndicated_from(entry, exclude_syndicated_from)):
+                # Only add if not too old (AI path bypasses check_entry_matches age filter)
+                pub_datetime = get_pub_datetime(entry)
+                if max_age_hours and pub_datetime:
+                    age = datetime.now(ZoneInfo("America/Los_Angeles")) - pub_datetime
+                    if age > timedelta(hours=max_age_hours):
+                        continue  # Skip old articles
                 ai_relevance_candidates.append((entry, feed_url))
     
     # AI relevance: try to assign communities to non-matching entries
