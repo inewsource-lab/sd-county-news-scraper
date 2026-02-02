@@ -1,33 +1,21 @@
 """Core RSS feed scraping logic."""
-import json
 import logging
 import re
-import time
-from pathlib import Path
 import feedparser
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Set, Optional, Tuple, Dict
+from typing import List, Set, Optional, Tuple, Dict, Any
 from time import sleep
 from urllib.parse import urlparse
 
 from .cache_manager import CacheManager
 from .notifier import send_slack_notification, send_grouped_notification
 from .story_grouper import StoryGrouper
+from . import llm
+from . import ai_helpers
 
 logger = logging.getLogger(__name__)
-
-# #region agent log
-_DEBUG_LOG_PATH = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
-def _debug_log(location: str, message: str, data: dict, hypothesis_id: str, run_id: str = "run1"):
-    try:
-        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"location": location, "message": message, "data": data, "hypothesisId": hypothesis_id, "runId": run_id, "timestamp": time.time()}) + "\n")
-    except Exception:
-        pass
-# #endregion
 
 # Request timeout for feed fetching
 FEED_TIMEOUT = 15
@@ -216,7 +204,8 @@ def check_entry_matches(
     cache: CacheManager,
     feed_url: str,
     max_age_hours: Optional[int] = None,
-    priority_sources: Optional[List[str]] = None
+    priority_sources: Optional[List[str]] = None,
+    community_exclusions: Optional[Dict[str, List[str]]] = None
 ) -> Optional[Dict]:
     """
     Check if an entry matches any community and hasn't been seen.
@@ -228,6 +217,8 @@ def check_entry_matches(
         feed_url: URL of the feed this entry came from
         max_age_hours: Optional maximum age in hours (None = no filtering)
         priority_sources: Optional list of priority source URLs
+        community_exclusions: Optional map community -> list of phrases; if any phrase
+            appears in the text, do not count that community (e.g. Vista -> ["Chula Vista"])
         
     Returns:
         Dictionary with match data if found, None otherwise:
@@ -249,9 +240,6 @@ def check_entry_matches(
     
     # Skip if already seen
     if cache.has_seen(link):
-        # #region agent log
-        _debug_log("scraper.check_entry_matches", "skip_already_seen", {"link": link[:80] + "..." if len(link) > 80 else link}, "H3")
-        # #endregion
         return None
     
     # Check recency filter
@@ -277,6 +265,15 @@ def check_entry_matches(
         # Escape special regex characters and use word boundaries
         pattern = r'\b' + re.escape(community.lower()) + r'\b'
         if re.search(pattern, combined):
+            # Apply exclusions: e.g. don't match "Vista" when "Chula Vista" appears
+            if community_exclusions and community in community_exclusions:
+                skip = False
+                for phrase in community_exclusions[community]:
+                    if re.search(r'\b' + re.escape(phrase.lower()) + r'\b', combined):
+                        skip = True
+                        break
+                if skip:
+                    continue
             matching_communities.append(community)
             # Determine if match is in title (more relevant) or summary
             if not match_location and re.search(pattern, title_lower):
@@ -308,6 +305,26 @@ def check_entry_matches(
     }
 
 
+def _build_match_from_entry(entry, feed_url: str, matching_communities: List[str], match_location: str, priority_sources: Optional[List[str]] = None) -> Dict:
+    """Build a match dict from an entry and given communities (e.g. from AI relevance)."""
+    title = entry.get('title', '').strip()
+    summary_raw = (entry.get('summary', '') or '').strip()
+    summary_plain = strip_html(summary_raw).strip()
+    excerpt = summary_plain if summary_plain else title
+    pub_datetime = get_pub_datetime(entry)
+    return {
+        'communities': matching_communities,
+        'title': title,
+        'pub_date': format_pub_date(entry),
+        'pub_datetime': pub_datetime,
+        'link': entry.get('link', ''),
+        'source': extract_source_name(feed_url),
+        'excerpt': excerpt,
+        'match_location': match_location,
+        'is_priority': is_priority_source(feed_url, priority_sources),
+    }
+
+
 def scrape_and_notify(
     feed_urls: List[str],
     communities: List[str],
@@ -318,7 +335,15 @@ def scrape_and_notify(
     excerpt_length: int = 250,
     group_stories: bool = True,
     similarity_threshold: float = 0.6,
-    unfurl_links: bool = False
+    unfurl_links: bool = False,
+    community_exclusions: Optional[Dict[str, List[str]]] = None,
+    use_semantic_grouping: bool = False,
+    semantic_similarity_threshold: float = 0.78,
+    use_ai_summaries: bool = False,
+    use_ai_relevance: bool = False,
+    use_urgency: bool = False,
+    use_group_summary: bool = False,
+    use_suggested_angle: bool = False,
 ) -> int:
     """
     Scrape RSS feeds and send notifications for matching articles.
@@ -334,12 +359,21 @@ def scrape_and_notify(
         group_stories: Whether to group similar stories (default: True)
         similarity_threshold: Minimum similarity to group stories (default: 0.6)
         unfurl_links: If False, disable Slack link/media unfurling (default: True)
+        community_exclusions: Optional map community -> list of phrases to exclude (e.g. Vista -> ["Chula Vista"])
+        use_semantic_grouping: Use embedding similarity for grouping (default: False)
+        semantic_similarity_threshold: Cosine threshold when using semantic grouping (default: 0.78)
+        use_ai_summaries: Add one-sentence AI summary per article (default: False)
+        use_ai_relevance: Assign communities via AI when not in text (default: False)
+        use_urgency: Classify breaking/developing/routine (default: False)
+        use_group_summary: AI-synthesized summary for grouped stories (default: False)
+        use_suggested_angle: AI-suggested follow-up angle for groups (default: False)
         
     Returns:
         Number of articles posted
     """
-    # Collect all matches first
+    # Collect all matches first; optionally collect no-match entries for AI relevance
     all_matches: List[Dict] = []
+    ai_relevance_candidates: List[Tuple[Any, str]] = []  # (entry, feed_url)
     
     for feed_url in feed_urls:
         feed = fetch_feed(feed_url)
@@ -355,57 +389,104 @@ def scrape_and_notify(
         
         for entry in feed.entries:
             match = check_entry_matches(
-                entry, 
-                communities, 
-                cache, 
+                entry,
+                communities,
+                cache,
                 feed_url,
                 max_age_hours=max_age_hours,
-                priority_sources=priority_sources
+                priority_sources=priority_sources,
+                community_exclusions=community_exclusions,
             )
             
             if match:
                 communities_str = ', '.join(match['communities'])
                 logger.info(f"Match found for {communities_str}: {match['title']}")
-                # #region agent log
-                _debug_log("scraper.scrape_and_notify", "match_added", {"link": match["link"][:80] + "..." if len(match["link"]) > 80 else match["link"], "title": match["title"][:50] + "..." if len(match["title"]) > 50 else match["title"], "feed_url": feed_url[:60] + "..." if len(feed_url) > 60 else feed_url}, "H5")
-                # #endregion
                 all_matches.append(match)
-        
-        # Be respectful - delay between feeds
-        if feed_url != feed_urls[-1]:  # Don't delay after last feed
-            sleep(FEED_DELAY)
+            elif use_ai_relevance and llm.is_available():
+                ai_relevance_candidates.append((entry, feed_url))
+    
+    # AI relevance: try to assign communities to non-matching entries
+    if use_ai_relevance and ai_relevance_candidates and llm.is_available():
+        candidates_titles = []
+        candidates_excerpts = []
+        for entry, _ in ai_relevance_candidates:
+            title = entry.get('title', '').strip()
+            summary_raw = (entry.get('summary', '') or '').strip()
+            summary_plain = strip_html(summary_raw).strip()
+            candidates_titles.append(title)
+            candidates_excerpts.append(summary_plain if summary_plain else title)
+        candidates_pairs = list(zip(candidates_titles, candidates_excerpts))
+        relevance_results = ai_helpers.batch_ai_relevance(candidates_pairs, communities)
+        for (entry, feed_url), ai_communities in zip(ai_relevance_candidates, relevance_results):
+            if not ai_communities:
+                continue
+            # Build match dict and append (same cache/recency already satisfied by check_entry_matches returning None)
+            m = _build_match_from_entry(entry, feed_url, ai_communities, 'ai_relevance', priority_sources)
+            if cache.has_seen(m['link']):
+                continue
+            logger.info(f"AI relevance match for {', '.join(ai_communities)}: {m['title']}")
+            all_matches.append(m)
     
     if not all_matches:
         logger.info("No matching articles found")
         return 0
     
+    # Urgency: classify each match
+    if use_urgency and llm.is_available():
+        for match in all_matches:
+            match['urgency'] = ai_helpers.classify_urgency(match['title'], match.get('excerpt', ''))
+    else:
+        for match in all_matches:
+            match['urgency'] = 'routine'
+    
+    # AI summaries for single articles (used when we send individual notifications)
+    if use_ai_summaries and llm.is_available():
+        for match in all_matches:
+            summary = ai_helpers.summarize_article(match['title'], match.get('excerpt', ''))
+            match['ai_summary'] = summary
+    else:
+        for match in all_matches:
+            match['ai_summary'] = None
+    
+    # Embeddings for semantic grouping
+    embedding_vectors = None
+    if use_semantic_grouping and llm.is_available() and len(all_matches) > 1:
+        texts = [m['title'] + ' ' + (m.get('excerpt') or '')[:500] for m in all_matches]
+        embedding_vectors = llm.get_embeddings(texts)
+    
+    # Sort all_matches by urgency (breaking first) so grouped order reflects it
+    urgency_order = {'breaking': 0, 'developing': 1, 'routine': 2}
+    all_matches.sort(key=lambda m: (urgency_order.get(m.get('urgency', 'routine'), 2), -(m['pub_datetime'].timestamp() if m.get('pub_datetime') else 0)))
+    
     posted_count = 0
+    group_threshold = semantic_similarity_threshold if (use_semantic_grouping and embedding_vectors) else similarity_threshold
     
     # Group stories if enabled
     if group_stories and len(all_matches) > 1:
-        grouper = StoryGrouper(similarity_threshold=similarity_threshold)
-        groups = grouper.group_stories(all_matches)
+        grouper = StoryGrouper(similarity_threshold=group_threshold)
+        groups = grouper.group_stories(all_matches, embedding_vectors=embedding_vectors)
         
         for group in groups:
             if len(group) > 1:
-                # Send grouped notification for multiple articles
+                group_summary = None
+                suggested_angle = None
+                if (use_group_summary or use_suggested_angle) and llm.is_available():
+                    group_summary, suggested_angle = ai_helpers.group_summary_and_angle(group)
                 if send_grouped_notification(
                     webhook_url,
                     group,
                     excerpt_length,
-                    unfurl_links
+                    unfurl_links,
+                    group_summary=group_summary,
+                    suggested_angle=suggested_angle,
                 ):
-                    # Mark all URLs in group as seen
-                    # #region agent log
-                    _debug_log("scraper.scrape_and_notify", "group_posted_marking", {"urls": [a["link"][:60] + "..." for a in group], "group_size": len(group)}, "H3")
-                    # #endregion
                     for article in group:
                         cache.mark_seen(article['link'])
                     posted_count += len(group)
                     logger.info(f"Posted grouped notification for {len(group)} articles")
             else:
-                # Single article - send individual notification
                 article = group[0]
+                excerpt = article.get('ai_summary') or article.get('excerpt', '')
                 if send_slack_notification(
                     webhook_url,
                     article['communities'],
@@ -414,20 +495,18 @@ def scrape_and_notify(
                     article['pub_datetime'],
                     article['link'],
                     article['source'],
-                    article['excerpt'],
+                    excerpt,
                     article['match_location'],
                     article['is_priority'],
                     excerpt_length,
-                    unfurl_links
+                    unfurl_links,
+                    urgency=article.get('urgency'),
                 ):
-                    # #region agent log
-                    _debug_log("scraper.scrape_and_notify", "single_posted_marking", {"link": article["link"][:80] + "..." if len(article["link"]) > 80 else article["link"]}, "H3")
-                    # #endregion
                     cache.mark_seen(article['link'])
                     posted_count += 1
     else:
-        # Grouping disabled or only one match - send individual notifications
         for match in all_matches:
+            excerpt = match.get('ai_summary') or match.get('excerpt', '')
             if send_slack_notification(
                 webhook_url,
                 match['communities'],
@@ -436,15 +515,13 @@ def scrape_and_notify(
                 match['pub_datetime'],
                 match['link'],
                 match['source'],
-                match['excerpt'],
+                excerpt,
                 match['match_location'],
                 match['is_priority'],
                 excerpt_length,
-                unfurl_links
+                unfurl_links,
+                urgency=match.get('urgency'),
             ):
-                # #region agent log
-                _debug_log("scraper.scrape_and_notify", "single_posted_marking_no_group", {"link": match["link"][:80] + "..." if len(match["link"]) > 80 else match["link"]}, "H3")
-                # #endregion
                 cache.mark_seen(match['link'])
                 posted_count += 1
     

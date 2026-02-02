@@ -90,5 +90,24 @@ group_stories: true
 # Lower values = more lenient grouping (more articles grouped together)
 similarity_threshold: 0.6
 
+# community_exclusions: Don't match a community when a more specific phrase appears (e.g. Vista vs Chula Vista)
+community_exclusions:
+  Vista: ["Chula Vista"]
+
+# AI features (require OPENAI_API_KEY; all default false)
+# use_semantic_grouping: Group stories by embedding similarity instead of word overlap
+use_semantic_grouping: true
+semantic_similarity_threshold: 0.78
+# use_ai_summaries: One-sentence AI summary per article in Slack
+use_ai_summaries: true
+# use_ai_relevance: Assign communities when place name isn't in text
+use_ai_relevance: true
+# use_urgency: Classify breaking/developing/routine and show label
+use_urgency: true
+# use_group_summary: AI-synthesized summary for grouped stories
+use_group_summary: true
+# use_suggested_angle: AI-suggested follow-up angle for grouped stories
+use_suggested_angle: true
+
 # slack_unfurl_links: Set to false to disable Slack link/media previews (default: true)
-# slack_unfurl_links: false
+slack_unfurl_links: false

@@ -117,7 +117,8 @@ def send_slack_notification(
     match_location: str,
     is_priority: bool,
     excerpt_length: int = 250,
-    unfurl_links: bool = True
+    unfurl_links: bool = True,
+    urgency: Optional[str] = None
 ) -> bool:
     """
     Send notification to Slack webhook using Block Kit format.
@@ -130,26 +131,30 @@ def send_slack_notification(
         pub_datetime: Publication datetime object (for relative time)
         link: Article URL
         source: Source name
-        excerpt: Article excerpt/summary
-        match_location: Where match was found ('title' or 'summary')
+        excerpt: Article excerpt/summary (or AI summary when provided)
+        match_location: Where match was found ('title', 'summary', or 'ai_relevance')
         is_priority: Whether source is a priority/local source
         excerpt_length: Maximum excerpt length
         unfurl_links: If False, disable Slack link/media unfurling (default: True)
+        urgency: Optional 'breaking', 'developing', or 'routine' for label
 
     Returns:
         True if successful, False otherwise
     """
     # Format communities
     communities_text = ', '.join(communities)
-    if len(communities) > 1:
-        communities_display = f"🏘️ {communities_text}"
-    else:
-        communities_display = f"🏘️ {communities_text}"
+    communities_display = f"🏘️ {communities_text}"
     
     # Format source with priority indicator
     source_display = f"📰 {source}"
     if is_priority:
         source_display += " (Local)"
+    
+    # Urgency label
+    if urgency == 'breaking':
+        source_display = "🔴 *Breaking* | " + source_display
+    elif urgency == 'developing':
+        source_display = "🟡 *Developing* | " + source_display
     
     # Format relative time
     relative_time = format_relative_time(pub_datetime)
@@ -179,7 +184,7 @@ def send_slack_notification(
             "text": f"*{title}*"
         }
     })
-    match_indicator = "📍 In title" if match_location == 'title' else "📄 In summary"
+    match_indicator = "📍 In title" if match_location == 'title' else ("📄 In summary" if match_location == 'summary' else "🤖 AI relevance")
     blocks.append({
         "type": "context",
         "elements": [
@@ -239,7 +244,9 @@ def send_grouped_notification(
     webhook_url: str,
     articles: List[dict],
     excerpt_length: int = 250,
-    unfurl_links: bool = True
+    unfurl_links: bool = True,
+    group_summary: Optional[str] = None,
+    suggested_angle: Optional[str] = None,
 ) -> bool:
     """
     Send grouped notification to Slack for multiple articles about the same story.
@@ -249,6 +256,8 @@ def send_grouped_notification(
         articles: List of article dictionaries (each with same structure as individual notifications)
         excerpt_length: Maximum excerpt length
         unfurl_links: If False, disable Slack link/media unfurling (default: True)
+        group_summary: Optional AI-synthesized 1–2 sentence summary for the group
+        suggested_angle: Optional AI-suggested follow-up angle for journalists
 
     Returns:
         True if successful, False otherwise
@@ -267,8 +276,8 @@ def send_grouped_notification(
     # Select best article for main display (priority source first, then most recent)
     main_article = articles[0]  # Already sorted by priority/time in grouper
     
-    # Select best excerpt
-    best_excerpt = select_best_excerpt(articles)
+    # Use group summary if provided, else best excerpt
+    best_excerpt = group_summary if group_summary else select_best_excerpt(articles)
     truncated_excerpt = truncate_excerpt(best_excerpt, excerpt_length) if best_excerpt else None
     
     # Format source count
@@ -312,6 +321,14 @@ def send_grouped_notification(
         "type": "context",
         "elements": [{"type": "mrkdwn", "text": time_display}]
     })
+    if suggested_angle:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"💡 *Suggested angle:* {suggested_angle}"
+            }
+        })
     sources_text = "📰 *Sources:*\n"
     for article in articles:
         source_name = article.get('source', 'Unknown Source')

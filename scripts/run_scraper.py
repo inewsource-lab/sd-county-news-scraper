@@ -21,6 +21,13 @@ except ImportError:
 # Add parent directory to path to import src modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Load .env so OPENAI_API_KEY is available for AI features
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from src.scraper import scrape_and_notify
 from src.cache_manager import CacheManager
 
@@ -126,6 +133,14 @@ def main():
     group_stories = config.get('group_stories', True)
     similarity_threshold = config.get('similarity_threshold', 0.6)
     unfurl_links = config.get('slack_unfurl_links', True)
+    community_exclusions = config.get('community_exclusions')
+    use_semantic_grouping = config.get('use_semantic_grouping', False)
+    semantic_similarity_threshold = config.get('semantic_similarity_threshold', 0.78)
+    use_ai_summaries = config.get('use_ai_summaries', False)
+    use_ai_relevance = config.get('use_ai_relevance', False)
+    use_urgency = config.get('use_urgency', False)
+    use_group_summary = config.get('use_group_summary', False)
+    use_suggested_angle = config.get('use_suggested_angle', False)
     
     logger.info(f"Monitoring {len(communities)} communities across {len(feeds)} feeds")
     if max_age_hours:
@@ -152,7 +167,15 @@ def main():
             excerpt_length=excerpt_length,
             group_stories=group_stories,
             similarity_threshold=similarity_threshold,
-            unfurl_links=unfurl_links
+            unfurl_links=unfurl_links,
+            community_exclusions=community_exclusions,
+            use_semantic_grouping=use_semantic_grouping,
+            semantic_similarity_threshold=semantic_similarity_threshold,
+            use_ai_summaries=use_ai_summaries,
+            use_ai_relevance=use_ai_relevance,
+            use_urgency=use_urgency,
+            use_group_summary=use_group_summary,
+            use_suggested_angle=use_suggested_angle,
         )
         
         logger.info(f"Posted {posted_count} new articles")

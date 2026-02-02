@@ -6,8 +6,20 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Cosine similarity between two vectors. Returns 0.0 if invalid."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 class StoryGrouper:
-    """Groups similar articles based on title similarity."""
+    """Groups similar articles based on title (and optionally embedding) similarity."""
     
     def __init__(self, similarity_threshold: float = 0.6):
         """
@@ -54,12 +66,40 @@ class StoryGrouper:
         
         return similarity
     
-    def group_stories(self, articles: List[Dict]) -> List[List[Dict]]:
+    def _similarity(
+        self,
+        article: Dict,
+        group_article: Dict,
+        embedding_vectors: Optional[List[List[float]]] = None,
+        article_idx: Optional[int] = None,
+        group_article_idx_in_flat: Optional[Dict] = None,
+    ) -> float:
+        """Return similarity between article and group_article; use embeddings if provided."""
+        if embedding_vectors is not None and article_idx is not None and group_article_idx_in_flat is not None:
+            idx2 = group_article_idx_in_flat.get(id(group_article))
+            if idx2 is not None:
+                v1 = embedding_vectors[article_idx]
+                v2 = embedding_vectors[idx2]
+                if v1 and v2:
+                    return _cosine_similarity(v1, v2)
+        title = article.get('title', '')
+        group_title = group_article.get('title', '')
+        if title and group_title:
+            return self.calculate_similarity(title, group_title)
+        return 0.0
+
+    def group_stories(
+        self,
+        articles: List[Dict],
+        embedding_vectors: Optional[List[List[float]]] = None,
+    ) -> List[List[Dict]]:
         """
-        Group articles into clusters based on title similarity.
+        Group articles into clusters based on title or embedding similarity.
         
         Args:
             articles: List of article dictionaries with 'title' key
+            embedding_vectors: Optional list of embedding vectors (same order as articles);
+                when provided, cosine similarity is used instead of Jaccard on titles
             
         Returns:
             List of groups, where each group is a list of similar articles
@@ -67,39 +107,47 @@ class StoryGrouper:
         if not articles:
             return []
         
+        # Build flat index: article id -> index (for embedding lookup)
+        article_to_idx = {id(a): i for i, a in enumerate(articles)}
+        use_embeddings = (
+            embedding_vectors is not None
+            and len(embedding_vectors) == len(articles)
+        )
+        
         groups: List[List[Dict]] = []
         
-        for article in articles:
+        for i, article in enumerate(articles):
             title = article.get('title', '')
-            if not title:
-                # Articles without titles go into their own group
+            if not title and not use_embeddings:
                 groups.append([article])
                 continue
             
-            # Find the best matching group
             best_group_idx = None
             best_similarity = 0.0
             
             for idx, group in enumerate(groups):
-                # Check similarity against all articles in the group
-                # Use the highest similarity found in the group
                 max_similarity = 0.0
                 for group_article in group:
-                    group_title = group_article.get('title', '')
-                    if group_title:
-                        similarity = self.calculate_similarity(title, group_title)
-                        max_similarity = max(max_similarity, similarity)
+                    if use_embeddings and embedding_vectors:
+                        sim = self._similarity(
+                            article,
+                            group_article,
+                            embedding_vectors=embedding_vectors,
+                            article_idx=i,
+                            group_article_idx_in_flat=article_to_idx,
+                        )
+                    else:
+                        sim = self._similarity(article, group_article)
+                    max_similarity = max(max_similarity, sim)
                 
                 if max_similarity > best_similarity:
                     best_similarity = max_similarity
                     best_group_idx = idx
             
-            # Add to existing group if similarity is above threshold
             if best_group_idx is not None and best_similarity >= self.similarity_threshold:
                 groups[best_group_idx].append(article)
                 logger.debug(f"Added article to existing group (similarity: {best_similarity:.2f})")
             else:
-                # Create new group
                 groups.append([article])
                 logger.debug(f"Created new group for article")
         
