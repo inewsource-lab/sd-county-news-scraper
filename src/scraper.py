@@ -174,6 +174,30 @@ def strip_html(html_str: str) -> str:
     return soup.get_text(separator=' ', strip=True)
 
 
+def is_syndicated_from(entry, exclude_list: Optional[List[str]]) -> bool:
+    """
+    Return True if the entry appears to be syndicated from one of the excluded sources.
+    Checks author field and start of summary/title for byline phrases (e.g. AP, CalMatters).
+    """
+    if not exclude_list:
+        return False
+    author = (entry.get('author') or '').strip().lower()
+    title = (entry.get('title') or '').strip()
+    summary_raw = (entry.get('summary') or '').strip()
+    summary_plain = strip_html(summary_raw).strip()
+    # Check first ~200 chars of summary (byline often at start) and full title
+    byline_zone = (summary_plain[:200] + ' ' + title).lower()
+    for phrase in exclude_list:
+        if not phrase or not phrase.strip():
+            continue
+        p = phrase.strip().lower()
+        if p in author:
+            return True
+        if p in byline_zone:
+            return True
+    return False
+
+
 def fetch_feed(feed_url: str) -> Optional[feedparser.FeedParserDict]:
     """
     Fetch and parse an RSS feed with error handling.
@@ -205,7 +229,8 @@ def check_entry_matches(
     feed_url: str,
     max_age_hours: Optional[int] = None,
     priority_sources: Optional[List[str]] = None,
-    community_exclusions: Optional[Dict[str, List[str]]] = None
+    community_exclusions: Optional[Dict[str, List[str]]] = None,
+    exclude_syndicated_from: Optional[List[str]] = None,
 ) -> Optional[Dict]:
     """
     Check if an entry matches any community and hasn't been seen.
@@ -219,6 +244,8 @@ def check_entry_matches(
         priority_sources: Optional list of priority source URLs
         community_exclusions: Optional map community -> list of phrases; if any phrase
             appears in the text, do not count that community (e.g. Vista -> ["Chula Vista"])
+        exclude_syndicated_from: Optional list of syndication source names (e.g. AP, CalMatters);
+            entries with author/byline matching any are excluded.
         
     Returns:
         Dictionary with match data if found, None otherwise:
@@ -249,6 +276,11 @@ def check_entry_matches(
         if age > timedelta(hours=max_age_hours):
             logger.debug(f"Skipping article older than {max_age_hours} hours: {link}")
             return None
+    
+    # Skip syndicated content (e.g. AP, CalMatters) when excluded
+    if exclude_syndicated_from and is_syndicated_from(entry, exclude_syndicated_from):
+        logger.debug(f"Skipping syndicated article: {entry.get('title', '')[:50]}")
+        return None
     
     title = entry.get('title', '').strip()
     summary_raw = (entry.get('summary', '') or '').strip()
@@ -337,6 +369,7 @@ def scrape_and_notify(
     similarity_threshold: float = 0.6,
     unfurl_links: bool = False,
     community_exclusions: Optional[Dict[str, List[str]]] = None,
+    exclude_syndicated_from: Optional[List[str]] = None,
     use_semantic_grouping: bool = False,
     semantic_similarity_threshold: float = 0.78,
     use_ai_summaries: bool = False,
@@ -360,6 +393,7 @@ def scrape_and_notify(
         similarity_threshold: Minimum similarity to group stories (default: 0.6)
         unfurl_links: If False, disable Slack link/media unfurling (default: True)
         community_exclusions: Optional map community -> list of phrases to exclude (e.g. Vista -> ["Chula Vista"])
+        exclude_syndicated_from: Optional list of syndication sources to exclude (e.g. AP, CalMatters)
         use_semantic_grouping: Use embedding similarity for grouping (default: False)
         semantic_similarity_threshold: Cosine threshold when using semantic grouping (default: 0.78)
         use_ai_summaries: Add one-sentence AI summary per article (default: False)
@@ -396,13 +430,14 @@ def scrape_and_notify(
                 max_age_hours=max_age_hours,
                 priority_sources=priority_sources,
                 community_exclusions=community_exclusions,
+                exclude_syndicated_from=exclude_syndicated_from,
             )
             
             if match:
                 communities_str = ', '.join(match['communities'])
                 logger.info(f"Match found for {communities_str}: {match['title']}")
                 all_matches.append(match)
-            elif use_ai_relevance and llm.is_available():
+            elif use_ai_relevance and llm.is_available() and not (exclude_syndicated_from and is_syndicated_from(entry, exclude_syndicated_from)):
                 ai_relevance_candidates.append((entry, feed_url))
     
     # AI relevance: try to assign communities to non-matching entries

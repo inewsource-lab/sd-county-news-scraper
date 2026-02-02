@@ -65,6 +65,12 @@ group_stories: true
 # Lower values = more lenient grouping (more articles grouped together)
 similarity_threshold: 0.6
 
+# exclude_syndicated_from: Skip articles syndicated from these sources (author or byline in summary/title)
+exclude_syndicated_from:
+  - Associated Press
+  - CalMatters
+  - AP
+
 # AI features (require OPENAI_API_KEY; all default false)
 # use_semantic_grouping: Group stories by embedding similarity instead of word overlap
 use_semantic_grouping: true

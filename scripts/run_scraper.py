@@ -134,6 +134,7 @@ def main():
     similarity_threshold = config.get('similarity_threshold', 0.6)
     unfurl_links = config.get('slack_unfurl_links', True)
     community_exclusions = config.get('community_exclusions')
+    exclude_syndicated_from = config.get('exclude_syndicated_from')
     use_semantic_grouping = config.get('use_semantic_grouping', False)
     semantic_similarity_threshold = config.get('semantic_similarity_threshold', 0.78)
     use_ai_summaries = config.get('use_ai_summaries', False)
@@ -169,6 +170,7 @@ def main():
             similarity_threshold=similarity_threshold,
             unfurl_links=unfurl_links,
             community_exclusions=community_exclusions,
+            exclude_syndicated_from=exclude_syndicated_from,
             use_semantic_grouping=use_semantic_grouping,
             semantic_similarity_threshold=semantic_similarity_threshold,
             use_ai_summaries=use_ai_summaries,
