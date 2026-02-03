@@ -64,7 +64,9 @@ def ai_relevance(title: str, excerpt: str, communities: List[str]) -> List[str]:
     communities_str = ", ".join(communities)
     prompt = f"""These are San Diego County community names: {communities_str}
 
-Given this article title and summary, which of these communities is this story most relevant to? Consider local government, schools, events, or geographic relevance. If none apply, say none.
+Given this article title and summary, which of these communities is this story most relevant to? Consider local government, schools, events, or geographic relevance.
+
+CRITICAL: If the story is about a city or place NOT in the list above (e.g., National City, Chula Vista, Imperial Beach, San Diego city), you MUST reply "none". Do not guess or pick the closest-sounding city. When in doubt, say "none"—it is better to omit an article than to assign it to the wrong community.
 
 Title: {title}
 Summary: {(excerpt or "")[:600]}
@@ -107,6 +109,8 @@ def batch_ai_relevance(
     prompt = f"""These are San Diego County community names: {communities_str}
 
 For each article below, which of these communities is this story relevant to? Reply with one line per article: comma-separated community names from the list above, or the word "none". Same number of lines as articles.
+
+CRITICAL: If a story is about a city or place NOT in the list (e.g., National City, Chula Vista, Imperial Beach, Oceanside when not in list), you MUST reply "none" for that article. Do not guess or pick the closest-sounding city. When in doubt, say "none"—better to omit than assign to the wrong community.
 
 {chr(10).join(lines)}"""
     out = llm.chat(prompt, max_tokens=400)
