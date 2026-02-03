@@ -475,15 +475,29 @@ def scrape_and_notify(
             candidates_excerpts.append(summary_plain if summary_plain else title)
         candidates_pairs = list(zip(candidates_titles, candidates_excerpts))
         relevance_results = ai_helpers.batch_ai_relevance(candidates_pairs, communities)
+        # Second-pass AI check: verify each AI-assigned community before accepting
+        to_verify = []
+        to_verify_entries = []
         for (entry, feed_url), ai_communities in zip(ai_relevance_candidates, relevance_results):
             if not ai_communities:
                 continue
-            # Build match dict and append (same cache/recency already satisfied by check_entry_matches returning None)
-            m = _build_match_from_entry(entry, feed_url, ai_communities, 'ai_relevance', priority_sources)
-            if cache.has_seen(m['link']):
-                continue
-            logger.info(f"AI relevance match for {', '.join(ai_communities)}: {m['title']}")
-            all_matches.append(m)
+            title = entry.get('title', '').strip()
+            summary_raw = (entry.get('summary', '') or '').strip()
+            summary_plain = strip_html(summary_raw).strip()
+            excerpt = summary_plain if summary_plain else title
+            to_verify.append((title, excerpt, ai_communities[0]))
+            to_verify_entries.append((entry, feed_url, ai_communities))
+        if to_verify:
+            verified = ai_helpers.batch_verify_community_relevance(to_verify)
+            for (entry, feed_url, ai_communities), passes in zip(to_verify_entries, verified):
+                if not passes:
+                    logger.debug(f"AI verification rejected (not specifically about {ai_communities[0]}): {entry.get('title', '')[:50]}")
+                    continue
+                m = _build_match_from_entry(entry, feed_url, ai_communities, 'ai_relevance', priority_sources)
+                if cache.has_seen(m['link']):
+                    continue
+                logger.info(f"AI relevance match for {', '.join(ai_communities)}: {m['title']}")
+                all_matches.append(m)
     
     if not all_matches:
         logger.info("No matching articles found")
