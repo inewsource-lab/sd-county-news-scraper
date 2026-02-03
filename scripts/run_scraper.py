@@ -139,6 +139,7 @@ def main():
     semantic_similarity_threshold = config.get('semantic_similarity_threshold', 0.78)
     use_ai_summaries = config.get('use_ai_summaries', False)
     use_ai_relevance = config.get('use_ai_relevance', False)
+    ai_relevance_exclusion_phrases = config.get('ai_relevance_exclusion_phrases')
     use_urgency = config.get('use_urgency', False)
     use_group_summary = config.get('use_group_summary', False)
     use_suggested_angle = config.get('use_suggested_angle', False)
@@ -175,6 +176,7 @@ def main():
             semantic_similarity_threshold=semantic_similarity_threshold,
             use_ai_summaries=use_ai_summaries,
             use_ai_relevance=use_ai_relevance,
+            ai_relevance_exclusion_phrases=ai_relevance_exclusion_phrases,
             use_urgency=use_urgency,
             use_group_summary=use_group_summary,
             use_suggested_angle=use_suggested_angle,
