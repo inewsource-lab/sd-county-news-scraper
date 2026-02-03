@@ -64,9 +64,13 @@ def ai_relevance(title: str, excerpt: str, communities: List[str]) -> List[str]:
     communities_str = ", ".join(communities)
     prompt = f"""These are San Diego County community names: {communities_str}
 
-Given this article title and summary, which of these communities is this story most relevant to? Consider local government, schools, events, or geographic relevance.
+Given this article title and summary, which of these communities is this story DIRECTLY and SPECIFICALLY about? Only assign a community if the story is clearly about something IN that community or that specifically affects it (e.g. event in that city, local government, local school, local business, local incident). Do NOT assign a community just because the story mentions "San Diego" or is from a San Diego outlet.
 
-CRITICAL: If the story is about a city or place NOT in the list above (e.g., National City, Chula Vista, Imperial Beach, San Diego city), you MUST reply "none". Do not guess or pick the closest-sounding city. When in doubt, say "none"—it is better to omit an article than to assign it to the wrong community.
+You MUST reply "none" if:
+- The story is about a different named place (e.g. La Jolla, San Diego city, National City, Chula Vista) that is not in the list above.
+- The story is general human interest, personality, or lifestyle with no clear tie to one of the listed communities.
+- The story has only broad regional relevance (e.g. "San Diego dogs", "San Diego chef") with no specific community.
+- You are unsure. Do not guess or pick a community; omit is better than wrong.
 
 Title: {title}
 Summary: {(excerpt or "")[:600]}
@@ -108,9 +112,11 @@ def batch_ai_relevance(
         lines.append(f"Article {i + 1}:\nTitle: {title}\nSummary: {excerpt_snippet}")
     prompt = f"""These are San Diego County community names: {communities_str}
 
-For each article below, which of these communities is this story relevant to? Reply with one line per article: comma-separated community names from the list above, or the word "none". Same number of lines as articles.
+For each article below, which of these communities is this story DIRECTLY and SPECIFICALLY about? Only assign a community if the story is clearly about something IN that community or that specifically affects it (event in that city, local government, local school, local business). Do NOT assign just because the story mentions "San Diego" or is from a San Diego outlet.
 
-CRITICAL: If a story is about a city or place NOT in the list (e.g., National City, Chula Vista, Imperial Beach, Oceanside when not in list), you MUST reply "none" for that article. Do not guess or pick the closest-sounding city. When in doubt, say "none"—better to omit than assign to the wrong community.
+You MUST reply "none" for an article if: the story is about a different named place (e.g. La Jolla, San Diego city) not in the list; it is general human interest/personality with no clear community tie; it has only broad regional relevance (e.g. "San Diego dogs") with no specific community; or you are unsure. Do not guess—omit is better than wrong.
+
+Reply with exactly one line per article: comma-separated community names from the list above, or the word "none". Same number of lines as articles.
 
 {chr(10).join(lines)}"""
     out = llm.chat(prompt, max_tokens=400)
