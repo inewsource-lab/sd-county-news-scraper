@@ -64,18 +64,19 @@ def ai_relevance(title: str, excerpt: str, communities: List[str]) -> List[str]:
     communities_str = ", ".join(communities)
     prompt = f"""These are San Diego County community names: {communities_str}
 
-Given this article title and summary, which of these communities is this story DIRECTLY and SPECIFICALLY about? Only assign a community if the story is clearly about something IN that community or that specifically affects it (e.g. event in that city, local government, local school, local business, local incident). Do NOT assign a community just because the story mentions "San Diego" or is from a San Diego outlet.
+Task: Reply with a community from the list ONLY if the story is explicitly about something happening IN that community (e.g. event there, local government, local school, local business, local incident). Otherwise reply "none".
 
-You MUST reply "none" if:
-- The story is about a different named place (e.g. La Jolla, San Diego city, National City, Chula Vista) that is not in the list above.
-- The story is general human interest, personality, or lifestyle with no clear tie to one of the listed communities.
-- The story has only broad regional relevance (e.g. "San Diego dogs", "San Diego chef") with no specific community.
-- You are unsure. Do not guess or pick a community; omit is better than wrong.
+You MUST reply "none" for:
+- Any story about a place NOT in the list (e.g. La Jolla, San Diego city, National City). That includes research or institutions in another place (e.g. Salk Institute is in La Jolla — reply "none").
+- Celebrity news, obituaries, entertainment, or personality stories with no mention of a listed community or an event in one.
+- Science, research, or general interest with no specific tie to one of the listed communities.
+- Broad regional or "San Diego" stories with no specific community named.
+- Any doubt. Default is "none"; do not guess.
 
 Title: {title}
 Summary: {(excerpt or "")[:600]}
 
-Reply with a comma-separated list of community names from the list above only (up to 3), or the single word "none". No other text."""
+Reply with only a comma-separated list of community names from the list above (up to 3), or the single word "none". No other text."""
     out = llm.chat(prompt, max_tokens=80)
     if not out or out.strip().lower() == "none":
         return []
@@ -112,9 +113,9 @@ def batch_ai_relevance(
         lines.append(f"Article {i + 1}:\nTitle: {title}\nSummary: {excerpt_snippet}")
     prompt = f"""These are San Diego County community names: {communities_str}
 
-For each article below, which of these communities is this story DIRECTLY and SPECIFICALLY about? Only assign a community if the story is clearly about something IN that community or that specifically affects it (event in that city, local government, local school, local business). Do NOT assign just because the story mentions "San Diego" or is from a San Diego outlet.
+Task: For each article, reply with a community from the list ONLY if the story is explicitly about something happening IN that community (event there, local government, local school, local business). Otherwise reply "none".
 
-You MUST reply "none" for an article if: the story is about a different named place (e.g. La Jolla, San Diego city) not in the list; it is general human interest/personality with no clear community tie; it has only broad regional relevance (e.g. "San Diego dogs") with no specific community; or you are unsure. Do not guess—omit is better than wrong.
+You MUST reply "none" for: stories about a place not in the list (e.g. La Jolla, San Diego city — including Salk Institute in La Jolla); celebrity/obituary/entertainment with no listed-community tie; science/research/general interest with no specific community; broad "San Diego" stories; or any doubt. Default is "none"; do not guess.
 
 Reply with exactly one line per article: comma-separated community names from the list above, or the word "none". Same number of lines as articles.
 
@@ -145,6 +146,39 @@ Reply with exactly one line per article: comma-separated community names from th
     while len(result) < len(candidates):
         result.append([])
     return result[: len(candidates)]
+
+
+def batch_verify_community_relevance(
+    items: List[Tuple[str, str, str]],
+) -> List[bool]:
+    """
+    Second-pass check: for each (title, excerpt, community), is this story
+    specifically about something happening IN that community?
+    Returns one bool per item. On API failure or parse error, returns False for that item.
+    """
+    if not llm.is_available() or not items:
+        return [False] * len(items)
+    lines = []
+    for i, (title, excerpt, community) in enumerate(items):
+        excerpt_snippet = (excerpt or "")[:350]
+        lines.append(f"{i + 1}. Community: {community}\nTitle: {title}\nSummary: {excerpt_snippet}")
+    prompt = f"""For each item below, answer: Is this story specifically about something happening IN the given community (e.g. event there, local government, local school, local business in that city)? Not just "San Diego area" or general interest—it must be clearly about that community.
+
+Reply with exactly one word per item: "yes" or "no". Same number of lines as items. No other text.
+
+{chr(10).join(lines)}"""
+    out = llm.chat(prompt, max_tokens=len(items) * 10 + 20)
+    if not out:
+        return [False] * len(items)
+    result = []
+    for line in out.strip().split("\n"):
+        line = line.strip()
+        if ":" in line:
+            line = line.split(":", 1)[1].strip()
+        result.append(line.lower().startswith("y"))
+    while len(result) < len(items):
+        result.append(False)
+    return result[: len(items)]
 
 
 def synthesize_group_summary(articles: List[Dict]) -> Optional[str]:
