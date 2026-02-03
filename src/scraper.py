@@ -374,6 +374,7 @@ def scrape_and_notify(
     semantic_similarity_threshold: float = 0.78,
     use_ai_summaries: bool = False,
     use_ai_relevance: bool = False,
+    ai_relevance_exclusion_phrases: Optional[List[str]] = None,
     use_urgency: bool = False,
     use_group_summary: bool = False,
     use_suggested_angle: bool = False,
@@ -398,6 +399,7 @@ def scrape_and_notify(
         semantic_similarity_threshold: Cosine threshold when using semantic grouping (default: 0.78)
         use_ai_summaries: Add one-sentence AI summary per article (default: False)
         use_ai_relevance: Assign communities via AI when not in text (default: False)
+        ai_relevance_exclusion_phrases: Skip AI relevance if article mentions these places (other region)
         use_urgency: Classify breaking/developing/routine (default: False)
         use_group_summary: AI-synthesized summary for grouped stories (default: False)
         use_suggested_angle: AI-suggested follow-up angle for groups (default: False)
@@ -444,7 +446,22 @@ def scrape_and_notify(
                     age = datetime.now(ZoneInfo("America/Los_Angeles")) - pub_datetime
                     if age > timedelta(hours=max_age_hours):
                         continue  # Skip old articles
-                ai_relevance_candidates.append((entry, feed_url))
+                # Skip if article mentions cross-region places (e.g. National City in North County)
+                if ai_relevance_exclusion_phrases:
+                    title = entry.get('title', '').strip()
+                    summary_raw = (entry.get('summary', '') or '').strip()
+                    summary_plain = strip_html(summary_raw).strip()
+                    combined = (title + " " + summary_plain).lower()
+                    for phrase in ai_relevance_exclusion_phrases:
+                        if phrase and phrase.strip():
+                            pattern = r'\b' + re.escape(phrase.lower()) + r'\b'
+                            if re.search(pattern, combined):
+                                logger.debug(f"Skipping AI relevance: article mentions '{phrase}': {entry.get('title', '')[:50]}")
+                                break
+                    else:
+                        ai_relevance_candidates.append((entry, feed_url))
+                else:
+                    ai_relevance_candidates.append((entry, feed_url))
     
     # AI relevance: try to assign communities to non-matching entries
     if use_ai_relevance and ai_relevance_candidates and llm.is_available():
