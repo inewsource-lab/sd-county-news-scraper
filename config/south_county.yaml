@@ -76,6 +76,16 @@ semantic_similarity_threshold: 0.78
 use_ai_summaries: true
 # use_ai_relevance: Assign communities when place name isn't in text
 use_ai_relevance: true
+# ai_relevance_exclusion_phrases: Don't run AI relevance if article mentions these places (other region)
+ai_relevance_exclusion_phrases:
+  - Oceanside
+  - Carlsbad
+  - Encinitas
+  - Escondido
+  - San Marcos
+  - Poway
+  - Ramona
+  - Del Mar
 # use_urgency: Classify breaking/developing/routine and show label
 use_urgency: true
 # use_group_summary: AI-synthesized summary for grouped stories
