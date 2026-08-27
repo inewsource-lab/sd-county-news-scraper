@@ -8,12 +8,14 @@ from zoneinfo import ZoneInfo
 from typing import List, Set, Optional, Tuple, Dict, Any
 from time import sleep
 from urllib.parse import urlparse
+from pathlib import Path
 
 from .cache_manager import CacheManager
 from .notifier import send_slack_notification, send_grouped_notification
 from .story_grouper import StoryGrouper
 from . import llm
 from . import ai_helpers
+from .weekly_archive import update_archive
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +380,7 @@ def scrape_and_notify(
     use_urgency: bool = False,
     use_group_summary: bool = False,
     use_suggested_angle: bool = False,
+    weekly_archive_path: Optional[str] = None,
 ) -> int:
     """
     Scrape RSS feeds and send notifications for matching articles.
@@ -403,6 +406,7 @@ def scrape_and_notify(
         use_urgency: Classify breaking/developing/routine (default: False)
         use_group_summary: AI-synthesized summary for grouped stories (default: False)
         use_suggested_angle: AI-suggested follow-up angle for groups (default: False)
+        weekly_archive_path: Optional JSON archive path for matched stories used by weekly digests
         
     Returns:
         Number of articles posted
@@ -502,6 +506,15 @@ def scrape_and_notify(
     if not all_matches:
         logger.info("No matching articles found")
         return 0
+
+    # Persist a compact copy before downstream Slack/AI work. The GitHub Action
+    # already saves .cache even on failure, so Friday can still see stories that
+    # were discovered during a transient notification problem.
+    if weekly_archive_path:
+        try:
+            update_archive(Path(weekly_archive_path), all_matches)
+        except Exception as exc:
+            logger.warning("Could not update weekly archive: %s", exc)
     
     # Urgency: classify each match
     if use_urgency and llm.is_available():

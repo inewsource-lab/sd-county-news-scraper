@@ -1,5 +1,6 @@
 """AI helpers: summarization, urgency, relevance, group summary, suggested angle."""
 import logging
+import re
 from typing import List, Dict, Optional, Tuple
 
 from . import llm
@@ -133,12 +134,17 @@ Reply with exactly one line per article: comma-separated community names from th
             result.append([])
             continue
         found = []
-        for part in line.replace(",", " ").split():
-            part = part.strip(".,")
-            if not part:
+        # The model is instructed to return comma-separated community names. Preserve
+        # spaces/hyphens so multi-word names such as "San Marcos" and
+        # "Rancho Santa Fe" are not accidentally split into separate words.
+        for part in line.split(","):
+            name = part.strip().strip(".")
+            if not name:
                 continue
+            # Tolerate a numbered prefix such as "1. San Marcos".
+            name = re.sub(r"^\d+[.)]\s*", "", name).strip()
             for c in communities:
-                if c.lower() == part.lower():
+                if c.lower() == name.lower():
                     found.append(c)
                     break
         result.append(found[:3])
@@ -175,6 +181,7 @@ Reply with exactly one word per item: "yes" or "no". Same number of lines as ite
         line = line.strip()
         if ":" in line:
             line = line.split(":", 1)[1].strip()
+        line = re.sub(r"^\d+[.)]\s*", "", line).strip()
         result.append(line.lower().startswith("y"))
     while len(result) < len(items):
         result.append(False)

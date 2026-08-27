@@ -180,6 +180,9 @@ def main():
             use_urgency=use_urgency,
             use_group_summary=use_group_summary,
             use_suggested_angle=use_suggested_angle,
+            weekly_archive_path=(
+                str(args.cache_dir / "weekly_north.json") if args.region == "north" else None
+            ),
         )
         
         logger.info(f"Posted {posted_count} new articles")
