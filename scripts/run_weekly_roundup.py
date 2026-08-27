@@ -28,6 +28,7 @@ except ImportError:
     pass
 
 from src import ai_helpers, llm
+from src.cache_manager import normalize_url
 from src.scraper import (
     _build_match_from_entry,
     check_entry_matches,
@@ -77,19 +78,7 @@ def load_config() -> Dict[str, Any]:
 
 def get_entry_datetime(entry) -> Any:
     """Return a Pacific-aware published/updated datetime when RSS metadata provides one."""
-    dt = get_pub_datetime(entry)
-    if dt:
-        return dt
-
-    for attr in ("updated_parsed", "created_parsed"):
-        parsed = getattr(entry, attr, None)
-        if parsed:
-            try:
-                dt_utc = datetime(*parsed[:6], tzinfo=ZoneInfo("UTC"))
-                return dt_utc.astimezone(PACIFIC)
-            except Exception:
-                continue
-    return None
+    return get_pub_datetime(entry)
 
 
 def _chunks(items: List[Any], size: int):
@@ -125,13 +114,14 @@ def batched_embeddings(texts: List[str]):
 
 
 def merge_articles(*collections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Merge archived/live matches by URL, preferring the newest copy."""
+    """Merge archived/live matches by normalized URL, preferring the newest copy."""
     by_url: Dict[str, Dict[str, Any]] = {}
     for collection in collections:
         for article in collection:
-            link = str(article.get("link") or "").strip()
+            link = normalize_url(str(article.get("link") or "").strip())
             if not link:
                 continue
+            article = {**article, "link": link}
             current = by_url.get(link)
             candidate_dt = article.get("pub_datetime")
             current_dt = current.get("pub_datetime") if current else None
@@ -168,7 +158,7 @@ def collect_weekly_articles(config: Dict[str, Any], logger: logging.Logger) -> L
 
         logger.info("Weekly scan: %s -> %s entries", feed_url, len(feed.entries))
         for entry in feed.entries:
-            link = (entry.get("link") or "").strip()
+            link = normalize_url((entry.get("link") or "").strip())
             if not link or link in seen_urls:
                 continue
 
@@ -191,8 +181,8 @@ def collect_weekly_articles(config: Dict[str, Any], logger: logging.Logger) -> L
                 exclude_syndicated_from=exclude_syndicated_from,
             )
             if match:
-                # check_entry_matches uses published_parsed only; preserve our updated/created
-                # fallback so weekly sorting still works for feeds without published_parsed.
+                # Prefer normalized link for weekly dedupe consistency.
+                match["link"] = link
                 if not match.get("pub_datetime"):
                     match["pub_datetime"] = pub_datetime
                     match["pub_date"] = pub_datetime.strftime("%Y-%m-%d %H:%M PT")
@@ -238,7 +228,7 @@ def collect_weekly_articles(config: Dict[str, Any], logger: logging.Logger) -> L
             for (entry, feed_url, assigned), passed in zip(verify_meta, passes):
                 if not passed:
                     continue
-                link = (entry.get("link") or "").strip()
+                link = normalize_url((entry.get("link") or "").strip())
                 if not link or link in seen_urls:
                     continue
                 match = _build_match_from_entry(
@@ -248,6 +238,7 @@ def collect_weekly_articles(config: Dict[str, Any], logger: logging.Logger) -> L
                     "ai_relevance",
                     priority_sources,
                 )
+                match["link"] = link
                 if not match.get("pub_datetime"):
                     fallback_dt = get_entry_datetime(entry)
                     if fallback_dt:

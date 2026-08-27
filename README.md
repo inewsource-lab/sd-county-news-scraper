@@ -1,15 +1,17 @@
 # San Diego County News Scraper
 
-A Python-based RSS feed scraper that monitors San Diego County news sources and posts relevant articles to Slack channels. Supports separate monitoring for North County and South Bay regions.
+A Python-based RSS feed scraper that monitors San Diego County news sources and posts relevant articles to Slack. Supports separate monitoring for North County and South Bay, plus an optional Friday North County weekly briefing.
 
 ## Features
 
 - **Dual Region Support**: Separate monitoring for North County and South Bay
 - **Configurable**: YAML-based configuration for communities and feeds
-- **Error Handling**: Retry logic, timeouts, and graceful error handling
-- **Cache Management**: Prevents duplicate posts with size-limited cache
-- **Logging**: Structured logging with configurable levels
-- **Separate Slack Channels**: Each region posts to its own Slack webhook/channel
+- **Story grouping**: Groups similar coverage from multiple outlets
+- **AI assists** (optional, needs `OPENAI_API_KEY`): summaries, urgency labels, semantic grouping, relevance when place names are missing
+- **Weekly roundup**: Friday North County briefing built from a weekly archive + live RSS scan
+- **Error Handling**: Timeouts, retries, and graceful feed failures
+- **Cache Management**: Per-region seen-URL cache with atomic writes and size limits
+- **GitHub Actions**: Hourly scraper + Friday weekly workflow
 
 ## Requirements
 
@@ -33,33 +35,30 @@ pip install -r requirements.txt
 
 ### Environment Variables
 
-Set the following environment variables with your Slack webhook URLs:
-
 - **North County**: `SLACK_WEBHOOK_NORTH`
 - **South Bay**: `SLACK_WEBHOOK_URL`
+- **Weekly (optional)**: `SLACK_WEBHOOK_NORTH_WEEKLY` (falls back to `SLACK_WEBHOOK_NORTH`)
+- **AI features**: `OPENAI_API_KEY`
 
 Example:
 ```bash
 export SLACK_WEBHOOK_NORTH="https://hooks.slack.com/services/YOUR/NORTH/WEBHOOK"
 export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/SOUTH/WEBHOOK"
+export OPENAI_API_KEY="sk-..."
 ```
 
 ### Configuration Files
 
-Edit the YAML files in the `config/` directory to customize:
+Edit the YAML files in the `config/` directory:
 
-- **Communities**: List of community names to monitor
-- **Feeds**: RSS feed URLs to scrape
-- **Optional** (see comments in YAML): `max_age_hours`, `priority_sources`, `excerpt_length`, `group_stories`, `similarity_threshold`, `slack_unfurl_links`
+- `config/north_county.yaml` — North County communities, feeds, AI toggles
+- `config/south_county.yaml` — South Bay communities, feeds, AI toggles
 
-Set `slack_unfurl_links: false` to disable Slack link/media previews (default: `true`).
+Common options: `max_age_hours`, `priority_sources`, `excerpt_length`, `group_stories`, `similarity_threshold`, `slack_unfurl_links`, `exclude_syndicated_from`, and the `use_*` AI flags.
 
-- `config/north_county.yaml` - North County configuration
-- `config/south_county.yaml` - South Bay configuration
+Set `slack_unfurl_links: false` to disable Slack link/media previews.
 
 ## Usage
-
-Run the scraper for a specific region:
 
 ```bash
 # North County
@@ -67,103 +66,86 @@ python scripts/run_scraper.py --region north
 
 # South Bay
 python scripts/run_scraper.py --region south
+
+# Friday-style weekly briefing (North County)
+python scripts/run_weekly_roundup.py
 ```
 
-### Options
+### Options (`run_scraper.py`)
 
-- `--region` (required): Region to scrape (`north` or `south`)
+- `--region` (required): `north` or `south`
 - `--config-dir`: Directory containing config files (default: `config/`)
 - `--cache-dir`: Directory for cache files (default: `.cache/`)
 - `--debug`: Enable debug logging
 
-### Examples
-
-```bash
-# Run with debug logging
-python scripts/run_scraper.py --region north --debug
-
-# Use custom config directory
-python scripts/run_scraper.py --region south --config-dir /path/to/configs
-```
-
 ## Scheduled Execution
 
-To run automatically, set up a cron job or scheduled task:
+GitHub Actions:
 
+- `.github/workflows/scraper.yml` — hourly North and South scrapes
+- `.github/workflows/north-county-weekly.yml` — Friday North County briefing
+
+See [WEEKLY_ROUNDUP_SETUP.md](WEEKLY_ROUNDUP_SETUP.md) for weekly setup and secrets.
+
+Local cron example:
 ```bash
-# Run every hour
 0 * * * * cd /path/to/scraper && python scripts/run_scraper.py --region north
 0 * * * * cd /path/to/scraper && python scripts/run_scraper.py --region south
 ```
-
-Or use a task scheduler like `systemd` timers on Linux or launchd on macOS.
 
 ## Project Structure
 
 ```
 SD County news scrapers/
 ├── README.md
+├── WEEKLY_ROUNDUP_SETUP.md
 ├── requirements.txt
-├── .gitignore
 ├── config/
 │   ├── north_county.yaml
 │   └── south_county.yaml
 ├── src/
-│   ├── __init__.py
-│   ├── scraper.py          # Core scraping logic
-│   ├── cache_manager.py   # Cache management
-│   └── notifier.py        # Slack notifications
-└── scripts/
-    └── run_scraper.py       # Main entry point
+│   ├── scraper.py
+│   ├── cache_manager.py
+│   ├── notifier.py
+│   ├── story_grouper.py
+│   ├── llm.py
+│   ├── ai_helpers.py
+│   └── weekly_archive.py
+├── scripts/
+│   ├── run_scraper.py
+│   └── run_weekly_roundup.py
+└── .github/workflows/
+    ├── scraper.yml
+    └── north-county-weekly.yml
 ```
 
 ## How It Works
 
-1. **Load Configuration**: Reads YAML config for the specified region
-2. **Fetch Feeds**: Scrapes RSS feeds with error handling and retries
-3. **Match Communities**: Checks article titles/summaries against community keywords
-4. **Check Cache**: Skips articles that have already been posted
-5. **Post to Slack**: Sends notifications to the configured webhook
-6. **Update Cache**: Saves seen articles to prevent duplicates
+1. Load YAML config for the region
+2. Fetch RSS feeds with timeout and a polite User-Agent
+3. Match community names (word boundaries + exclusions)
+4. Skip already-seen URLs and articles outside `max_age_hours`
+5. Optionally assign communities via AI, group similar stories, and enrich Slack text
+6. Post to Slack and update the seen-URL cache
+7. (North) Archive matches for the Friday weekly briefing
 
 ## Cache Management
 
-The scraper maintains a cache of seen article URLs to prevent duplicate posts. The cache:
-- Is stored per region (separate files for north/south)
-- Has a maximum size limit (10,000 entries)
-- Automatically trims old entries when limit is reached
-- Is saved after each run
-
-## Error Handling
-
-- **Feed Fetching**: Continues to next feed if one fails
-- **Slack Posting**: Retries up to 3 times with exponential backoff
-- **Network Timeouts**: 10-15 second timeouts prevent hanging
-- **Logging**: All errors are logged for debugging
+- Per-region files: `.cache/seen_north.txt`, `.cache/seen_south.txt`
+- URLs are normalized (scheme + host + path) so tracking params do not create duplicates
+- Newest entries are kept when the cache exceeds 10,000 URLs
+- Writes are atomic (temp file + replace)
+- North County also maintains `.cache/weekly_north.json` for the weekly roundup
 
 ## Troubleshooting
 
 ### "Environment variable not set"
-- Ensure `SLACK_WEBHOOK_NORTH` or `SLACK_WEBHOOK_URL` is set
-- Check that the variable is exported in your shell environment
-
-### "Config file not found"
-- Verify config files exist in `config/` directory
-- Check file names: `north_county.yaml` and `south_county.yaml`
+Ensure the Slack webhook env var named in the YAML (`webhook_env_var`) is exported.
 
 ### "No articles posted"
-- Check logs for feed fetching errors
-- Verify community names match article content (case-insensitive)
-- Check cache - articles may have already been posted
+Check logs for feed errors, confirm community names appear in titles/summaries, and verify the cache is not already marking items as seen.
 
 ### Import errors
-- Ensure all dependencies are installed: `pip install -r requirements.txt`
-- Check Python version (3.8+ required)
-
-## License
-
-[Your license here]
-
-## Contributing
-
-[Contributing guidelines here]
+```bash
+pip install -r requirements.txt
+```

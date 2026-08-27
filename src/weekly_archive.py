@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 from zoneinfo import ZoneInfo
 
+from .cache_manager import normalize_url
+
 logger = logging.getLogger(__name__)
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
@@ -50,7 +52,7 @@ def _load_raw(path: Path) -> List[Dict]:
 
 
 def update_archive(path: Path, articles: Iterable[Dict], retention_days: int = 10) -> int:
-    """Merge article matches into the archive, dedupe by URL, and prune old rows."""
+    """Merge article matches into the archive, dedupe by normalized URL, and prune old rows."""
     path = Path(path)
     now = datetime.now(PACIFIC)
     cutoff = now - timedelta(days=retention_days)
@@ -58,15 +60,17 @@ def update_archive(path: Path, articles: Iterable[Dict], retention_days: int = 1
     existing = _load_raw(path)
     by_url: Dict[str, Dict] = {}
     for item in existing:
-        link = str(item.get("link") or "").strip()
+        link = normalize_url(str(item.get("link") or "").strip())
         if link:
             by_url[link] = item
 
     for article in articles:
-        link = str(article.get("link") or "").strip()
+        raw_link = str(article.get("link") or "").strip()
+        link = normalize_url(raw_link)
         if not link:
             continue
         row = {field: article.get(field) for field in _FIELDS}
+        row["link"] = link
         pub_dt = article.get("pub_datetime")
         row["pub_datetime"] = pub_dt.isoformat() if isinstance(pub_dt, datetime) else None
         row["archived_at"] = now.isoformat()
@@ -106,6 +110,7 @@ def load_archive(path: Path, lookback_hours: int = 168) -> List[Dict]:
         if not dt or dt < cutoff:
             continue
         item = {field: row.get(field) for field in _FIELDS}
+        item["link"] = normalize_url(str(item.get("link") or ""))
         item["pub_datetime"] = dt
         if not item.get("pub_date") or item.get("pub_date") == "Unknown date":
             item["pub_date"] = dt.strftime("%Y-%m-%d %H:%M PT")

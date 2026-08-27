@@ -107,6 +107,8 @@ ai_relevance_exclusion_phrases:
   - Otay Mesa
   - Bonita
   - Lincoln Acres
+  - La Jolla
+  - Salk Institute
 # use_urgency: Classify breaking/developing/routine and show label
 use_urgency: true
 # use_group_summary: AI-synthesized summary for grouped stories

@@ -75,4 +75,4 @@ The workflow runs at `21:00 UTC` every Friday: 2 p.m. Pacific during daylight-sa
 
 ## Existing older workflows
 
-The repository already contains older notifier workflows (`north-county-notifier.yml` and `rss-notify.yml`) as well as the newer `scraper.yml`. This package does not delete them automatically. The weekly archive is populated by the newer North County job in `scraper.yml`.
+The weekly archive is populated by the North County job in `scraper.yml`. Legacy root scripts (`rss_notify.py`, `rss_notify_north.py`) have been removed; use `scripts/run_scraper.py` only.

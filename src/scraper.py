@@ -2,10 +2,11 @@
 import logging
 import re
 import feedparser
+import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Set, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any
 from time import sleep
 from urllib.parse import urlparse
 from pathlib import Path
@@ -23,27 +24,40 @@ logger = logging.getLogger(__name__)
 FEED_TIMEOUT = 15
 # Delay between feed requests to be respectful
 FEED_DELAY = 1
+# Bound AI relevance requests (same as weekly roundup)
+AI_RELEVANCE_BATCH_SIZE = 20
+USER_AGENT = "SDCountyNewsScraper/1.0 (+https://github.com/local-news-scraper; RSS monitor)"
+
+
+def _struct_time_to_pacific(parsed) -> Optional[datetime]:
+    """Convert a feedparser time.struct_time tuple to Pacific-aware datetime."""
+    if not parsed:
+        return None
+    try:
+        dt_utc = datetime(*parsed[:6], tzinfo=ZoneInfo("UTC"))
+        return dt_utc.astimezone(ZoneInfo("America/Los_Angeles"))
+    except Exception as e:
+        logger.debug(f"Error converting feed timestamp: {e}")
+        return None
 
 
 def get_pub_datetime(entry) -> Optional[datetime]:
     """
     Get publication datetime object from RSS entry.
-    
+
+    Prefers published_parsed, then updated_parsed / created_parsed so feeds
+    that only set an update time still get a usable age.
+
     Args:
         entry: feedparser entry object
-        
+
     Returns:
         datetime object in Pacific Time, or None if unavailable
     """
-    try:
-        if getattr(entry, 'published_parsed', None):
-            # Build a UTC datetime
-            dt_utc = datetime(*entry.published_parsed[:6], tzinfo=ZoneInfo("UTC"))
-            # Convert to Pacific Time
-            return dt_utc.astimezone(ZoneInfo("America/Los_Angeles"))
-    except Exception as e:
-        logger.debug(f"Error parsing published_parsed: {e}")
-    
+    for attr in ("published_parsed", "updated_parsed", "created_parsed"):
+        dt = _struct_time_to_pacific(getattr(entry, attr, None))
+        if dt:
+            return dt
     return None
 
 
@@ -106,6 +120,7 @@ def extract_source_name(feed_url: str) -> str:
             'ranchosfnews.com': 'Rancho Santa Fe News',
             'valleycenter.com': 'Valley Center News',
             'escondidotimes-advocate.com': 'Escondido Times-Advocate',
+            'times-advocate.com': 'Escondido Times-Advocate',
             'myvalleynews.com': 'My Valley News',
             'villagenews.com': 'Village News',
             'ramonasentinel.com': 'Ramona Sentinel',
@@ -176,10 +191,19 @@ def strip_html(html_str: str) -> str:
     return soup.get_text(separator=' ', strip=True)
 
 
+def _phrase_as_word(phrase: str, text: str) -> bool:
+    """True if phrase appears as a whole word/phrase in text (case-insensitive)."""
+    if not phrase or not text:
+        return False
+    pattern = r'\b' + re.escape(phrase.strip().lower()) + r'\b'
+    return re.search(pattern, text.lower()) is not None
+
+
 def is_syndicated_from(entry, exclude_list: Optional[List[str]]) -> bool:
     """
     Return True if the entry appears to be syndicated from one of the excluded sources.
     Checks author field and start of summary/title for byline phrases (e.g. AP, CalMatters).
+    Uses word boundaries so short tokens like "AP" do not match "April" or "map".
     """
     if not exclude_list:
         return False
@@ -192,35 +216,41 @@ def is_syndicated_from(entry, exclude_list: Optional[List[str]]) -> bool:
     for phrase in exclude_list:
         if not phrase or not phrase.strip():
             continue
-        p = phrase.strip().lower()
-        if p in author:
-            return True
-        if p in byline_zone:
+        if _phrase_as_word(phrase, author) or _phrase_as_word(phrase, byline_zone):
             return True
     return False
 
 
 def fetch_feed(feed_url: str) -> Optional[feedparser.FeedParserDict]:
     """
-    Fetch and parse an RSS feed with error handling.
-    
+    Fetch and parse an RSS feed with timeout and a polite User-Agent.
+
     Args:
         feed_url: URL of the RSS feed
-        
+
     Returns:
         Parsed feed object or None if failed
     """
     try:
         logger.debug(f"Fetching feed: {feed_url}")
-        feed = feedparser.parse(feed_url)
-        
+        response = requests.get(
+            feed_url,
+            timeout=FEED_TIMEOUT,
+            headers={"User-Agent": USER_AGENT, "Accept": "application/rss+xml, application/xml, text/xml, */*"},
+        )
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
+
         if feed.bozo:
             logger.warning(f"Feed parsing issues for {feed_url}: {feed.bozo_exception}")
-        
+
         return feed
-        
-    except Exception as e:
+
+    except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching feed {feed_url}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error parsing feed {feed_url}: {e}")
         return None
 
 
@@ -271,12 +301,20 @@ def check_entry_matches(
     if cache.has_seen(link):
         return None
     
-    # Check recency filter
+    # Check recency filter. Undated items cannot prove they are recent, so
+    # skip them when an age window is configured (hourly runs).
     pub_datetime = get_pub_datetime(entry)
-    if max_age_hours and pub_datetime:
+    if max_age_hours is not None:
+        if not pub_datetime:
+            logger.debug(f"Skipping undated article (max_age_hours={max_age_hours}): {link}")
+            return None
         age = datetime.now(ZoneInfo("America/Los_Angeles")) - pub_datetime
         if age > timedelta(hours=max_age_hours):
             logger.debug(f"Skipping article older than {max_age_hours} hours: {link}")
+            return None
+        # Reject clearly future-dated items (clock skew beyond a small allowance)
+        if age < timedelta(hours=-2):
+            logger.debug(f"Skipping article with future date: {link}")
             return None
     
     # Skip syndicated content (e.g. AP, CalMatters) when excluded
@@ -395,7 +433,7 @@ def scrape_and_notify(
         excerpt_length: Maximum length for article excerpts (default: 250)
         group_stories: Whether to group similar stories (default: True)
         similarity_threshold: Minimum similarity to group stories (default: 0.6)
-        unfurl_links: If False, disable Slack link/media unfurling (default: True)
+        unfurl_links: If False, disable Slack link/media unfurling (default: False)
         community_exclusions: Optional map community -> list of phrases to exclude (e.g. Vista -> ["Chula Vista"])
         exclude_syndicated_from: Optional list of syndication sources to exclude (e.g. AP, CalMatters)
         use_semantic_grouping: Use embedding similarity for grouping (default: False)
@@ -415,7 +453,10 @@ def scrape_and_notify(
     all_matches: List[Dict] = []
     ai_relevance_candidates: List[Tuple[Any, str]] = []  # (entry, feed_url)
     
-    for feed_url in feed_urls:
+    for feed_idx, feed_url in enumerate(feed_urls):
+        if feed_idx > 0 and FEED_DELAY > 0:
+            sleep(FEED_DELAY)
+
         feed = fetch_feed(feed_url)
         
         if not feed:
@@ -428,6 +469,10 @@ def scrape_and_notify(
             continue
         
         for entry in feed.entries:
+            link = (entry.get('link') or '').strip()
+            if not link or cache.has_seen(link):
+                continue
+
             match = check_entry_matches(
                 entry,
                 communities,
@@ -443,43 +488,59 @@ def scrape_and_notify(
                 communities_str = ', '.join(match['communities'])
                 logger.info(f"Match found for {communities_str}: {match['title']}")
                 all_matches.append(match)
-            elif use_ai_relevance and llm.is_available() and not (exclude_syndicated_from and is_syndicated_from(entry, exclude_syndicated_from)):
-                # Only add if not too old (AI path bypasses check_entry_matches age filter)
-                pub_datetime = get_pub_datetime(entry)
-                if max_age_hours and pub_datetime:
-                    age = datetime.now(ZoneInfo("America/Los_Angeles")) - pub_datetime
-                    if age > timedelta(hours=max_age_hours):
-                        continue  # Skip old articles
-                # Skip if article mentions cross-region places (e.g. National City in North County)
-                if ai_relevance_exclusion_phrases:
-                    title = entry.get('title', '').strip()
-                    summary_raw = (entry.get('summary', '') or '').strip()
-                    summary_plain = strip_html(summary_raw).strip()
-                    combined = (title + " " + summary_plain).lower()
-                    for phrase in ai_relevance_exclusion_phrases:
-                        if phrase and phrase.strip():
-                            pattern = r'\b' + re.escape(phrase.lower()) + r'\b'
-                            if re.search(pattern, combined):
-                                logger.debug(f"Skipping AI relevance: article mentions '{phrase}': {entry.get('title', '')[:50]}")
-                                break
-                    else:
-                        ai_relevance_candidates.append((entry, feed_url))
-                else:
-                    ai_relevance_candidates.append((entry, feed_url))
+                continue
+
+            if not (
+                use_ai_relevance
+                and llm.is_available()
+                and not (exclude_syndicated_from and is_syndicated_from(entry, exclude_syndicated_from))
+            ):
+                continue
+
+            # Same age rules as keyword matching (including skip undated when filtered)
+            pub_datetime = get_pub_datetime(entry)
+            if max_age_hours is not None:
+                if not pub_datetime:
+                    continue
+                age = datetime.now(ZoneInfo("America/Los_Angeles")) - pub_datetime
+                if age > timedelta(hours=max_age_hours) or age < timedelta(hours=-2):
+                    continue
+
+            if ai_relevance_exclusion_phrases:
+                title = entry.get('title', '').strip()
+                summary_raw = (entry.get('summary', '') or '').strip()
+                summary_plain = strip_html(summary_raw).strip()
+                combined = (title + " " + summary_plain).lower()
+                blocked = False
+                for phrase in ai_relevance_exclusion_phrases:
+                    if phrase and phrase.strip():
+                        pattern = r'\b' + re.escape(phrase.lower()) + r'\b'
+                        if re.search(pattern, combined):
+                            logger.debug(
+                                f"Skipping AI relevance: article mentions '{phrase}': "
+                                f"{entry.get('title', '')[:50]}"
+                            )
+                            blocked = True
+                            break
+                if blocked:
+                    continue
+
+            ai_relevance_candidates.append((entry, feed_url))
     
-    # AI relevance: try to assign communities to non-matching entries
+    # AI relevance: try to assign communities to non-matching entries (batched)
     if use_ai_relevance and ai_relevance_candidates and llm.is_available():
-        candidates_titles = []
-        candidates_excerpts = []
+        candidates_pairs = []
         for entry, _ in ai_relevance_candidates:
             title = entry.get('title', '').strip()
             summary_raw = (entry.get('summary', '') or '').strip()
             summary_plain = strip_html(summary_raw).strip()
-            candidates_titles.append(title)
-            candidates_excerpts.append(summary_plain if summary_plain else title)
-        candidates_pairs = list(zip(candidates_titles, candidates_excerpts))
-        relevance_results = ai_helpers.batch_ai_relevance(candidates_pairs, communities)
-        # Second-pass AI check: verify each AI-assigned community before accepting
+            candidates_pairs.append((title, summary_plain if summary_plain else title))
+
+        relevance_results: List[List[str]] = []
+        for i in range(0, len(candidates_pairs), AI_RELEVANCE_BATCH_SIZE):
+            batch = candidates_pairs[i : i + AI_RELEVANCE_BATCH_SIZE]
+            relevance_results.extend(ai_helpers.batch_ai_relevance(batch, communities))
+
         to_verify = []
         to_verify_entries = []
         for (entry, feed_url), ai_communities in zip(ai_relevance_candidates, relevance_results):
@@ -489,15 +550,38 @@ def scrape_and_notify(
             summary_raw = (entry.get('summary', '') or '').strip()
             summary_plain = strip_html(summary_raw).strip()
             excerpt = summary_plain if summary_plain else title
-            to_verify.append((title, excerpt, ai_communities[0]))
-            to_verify_entries.append((entry, feed_url, ai_communities))
+            # Verify every assigned community, not only the first
+            for community in ai_communities:
+                to_verify.append((title, excerpt, community))
+                to_verify_entries.append((entry, feed_url, community))
+
         if to_verify:
-            verified = ai_helpers.batch_verify_community_relevance(to_verify)
-            for (entry, feed_url, ai_communities), passes in zip(to_verify_entries, verified):
+            verified: List[bool] = []
+            for i in range(0, len(to_verify), AI_RELEVANCE_BATCH_SIZE):
+                batch = to_verify[i : i + AI_RELEVANCE_BATCH_SIZE]
+                verified.extend(ai_helpers.batch_verify_community_relevance(batch))
+
+            # Aggregate verified communities per entry (preserve order)
+            accepted: Dict[int, List[str]] = {}
+            entry_meta: Dict[int, Tuple[Any, str]] = {}
+            for (entry, feed_url, community), passes in zip(to_verify_entries, verified):
                 if not passes:
-                    logger.debug(f"AI verification rejected (not specifically about {ai_communities[0]}): {entry.get('title', '')[:50]}")
+                    logger.debug(
+                        f"AI verification rejected (not specifically about {community}): "
+                        f"{entry.get('title', '')[:50]}"
+                    )
                     continue
-                m = _build_match_from_entry(entry, feed_url, ai_communities, 'ai_relevance', priority_sources)
+                key = id(entry)
+                entry_meta[key] = (entry, feed_url)
+                accepted.setdefault(key, [])
+                if community not in accepted[key]:
+                    accepted[key].append(community)
+
+            for key, ai_communities in accepted.items():
+                entry, feed_url = entry_meta[key]
+                m = _build_match_from_entry(
+                    entry, feed_url, ai_communities, 'ai_relevance', priority_sources
+                )
                 if cache.has_seen(m['link']):
                     continue
                 logger.info(f"AI relevance match for {', '.join(ai_communities)}: {m['title']}")

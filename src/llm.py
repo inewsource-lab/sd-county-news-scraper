@@ -47,8 +47,9 @@ def get_embeddings(texts: List[str], model: str = "text-embedding-3-small") -> O
         return None
     try:
         response = client.embeddings.create(input=texts, model=model)
-        # Preserve order; response.data is in order
-        return [item.embedding for item in response.data]
+        # Preserve input order explicitly (API usually returns in order)
+        by_index = {item.index: item.embedding for item in response.data}
+        return [by_index[i] for i in range(len(texts))]
     except Exception as e:
         logger.warning(f"Embeddings API error: {e}")
         return None
