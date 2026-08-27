@@ -1,0 +1,43 @@
+name: North County Weekly Roundup
+
+on:
+  schedule:
+    # Friday afternoon Pacific (21:00 UTC = 2 p.m. PDT / 1 p.m. PST).
+    - cron: '0 21 * * 5'
+  workflow_dispatch:  # Lets you test it manually from the Actions tab
+
+jobs:
+  weekly-roundup:
+    runs-on: ubuntu-latest
+    name: Build North County weekly briefing
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore latest North County cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache
+          key: weekly-reader-north-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            seen-v2-north-${{ runner.os }}-
+
+      - name: Generate and post weekly roundup
+        env:
+          SLACK_WEBHOOK_NORTH_WEEKLY: ${{ secrets.SLACK_WEBHOOK_NORTH_WEEKLY }}
+          SLACK_WEBHOOK_NORTH: ${{ secrets.SLACK_WEBHOOK_NORTH }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python scripts/run_weekly_roundup.py
